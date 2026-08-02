@@ -217,20 +217,42 @@ only piece that needs to know about it.
    runs as its own independent process regardless of URL path - only the
    nginx routing in front of it changes.
 
-4. **nginx**: instead of `deploy/nginx_kertoons.conf` (which owns the whole
-   `server {}` block), use `deploy/nginx_kertoons_subpath.conf` - open your
-   **existing** kertoons.com site config
-   (probably `/etc/nginx/sites-available/kertoons.com` or similar - run
-   `nginx -T | grep -B5 "server_name kertoons.com"` if you're not sure which
-   file it's in), and paste the two `location` blocks from that file inside
-   the existing `server { ... }` block (anywhere alongside its other
-   `location` blocks - order relative to a `location /` block for the main
-   site doesn't matter here, since `/stories/` is more specific and nginx
-   always prefers the longest matching prefix).
-   ```bash
-   nano /etc/nginx/sites-available/kertoons.com   # paste the two location blocks in
-   nginx -t && systemctl reload nginx
-   ```
+4. **Reverse proxy**: which config to use depends on what's actually
+   serving kertoons.com today - check with
+   `apache2ctl -v 2>/dev/null || nginx -v` (whichever responds tells you).
+
+   - **nginx**: instead of `deploy/nginx_kertoons.conf` (which owns the
+     whole `server {}` block), use `deploy/nginx_kertoons_subpath.conf` -
+     open your **existing** kertoons.com site config (probably
+     `/etc/nginx/sites-available/kertoons.com` or similar - run
+     `nginx -T | grep -B5 "server_name kertoons.com"` if you're not sure
+     which file it's in), and paste the two `location` blocks from that file
+     inside the existing `server { ... }` block (anywhere alongside its
+     other `location` blocks - order doesn't matter here since `/stories/`
+     is more specific and nginx always prefers the longest matching prefix).
+     ```bash
+     nano /etc/nginx/sites-available/kertoons.com   # paste the two location blocks in
+     nginx -t && systemctl reload nginx
+     ```
+
+   - **Apache**: use `deploy/apache_kertoons_subpath.conf` instead - first
+     enable the proxy modules (`a2enmod proxy proxy_http`), then find your
+     **existing** kertoons.com vhost file(s)
+     (`apache2ctl -S` lists every vhost and its config file - if you're on
+     HTTPS there are usually two: one for port 80, one for port 443/SSL,
+     paste into both) and add the directives from that file inside the
+     `<VirtualHost>` block:
+     ```bash
+     a2enmod proxy proxy_http
+     nano /etc/apache2/sites-available/kertoons.com-le-ssl.conf   # paste the directives in
+     apache2ctl configtest && systemctl reload apache2
+     ```
+     If you see an Apache "Index of /stories" directory listing instead of
+     the app, that means a plain (empty) folder named `stories` already
+     exists under this site's `DocumentRoot` and nothing is proxying to it
+     yet - `ProxyPass` above takes priority once added, but it's clearer to
+     also remove that folder (`rm -rf` it under your `DocumentRoot`, e.g.
+     `/var/www/kertoons.com/stories`).
 
 5. **Verify**: open `https://kertoons.com/stories/` (note the trailing
    slash - `https://kertoons.com/stories` without it will redirect there
@@ -238,8 +260,9 @@ only piece that needs to know about it.
    unaffected.
 
 If you'd rather run the app on a **different** machine than the one serving
-kertoons.com, the only change is `proxy_pass` in
-`deploy/nginx_kertoons_subpath.conf` - point it at that machine's address
+kertoons.com, the only change is the proxy target
+(`proxy_pass` in the nginx config, `ProxyPass`/`ProxyPassReverse` in the
+Apache one) - point it at that machine's address
 (`http://OTHER_SERVER_IP:8765/`) instead of `127.0.0.1:8765/`, and make sure
 that machine's firewall allows inbound traffic on port 8765 from the
 kertoons.com server's IP specifically (not the open internet).
