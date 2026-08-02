@@ -15,8 +15,8 @@ are yours to do - I can't create accounts or enter payment details on your
 behalf. Where a step is just running commands, the exact commands are given.
 
 **Already have kertoons.com running and just want to add this app at
-`kertoons.com/story` instead of its own domain?** Skip to
-["Mounting under an existing site"](#mounting-under-an-existing-site-kertoonscomstory)
+`kertoons.com/stories` instead of its own domain?** Skip to
+["Mounting under an existing site"](#mounting-under-an-existing-site-kertoonscomstories)
 near the bottom - it reuses steps 3-7 below (Python setup, systemd service)
 but replaces the standalone nginx config with a location block added to your
 existing site.
@@ -81,32 +81,24 @@ apt install -y python3 python3-venv python3-pip nginx certbot python3-certbot-ng
 
 ## 4. Get the app code onto the Droplet
 
-This project isn't in a git repo, so the simplest path is copying it
-directly from your Windows machine. From a **new terminal on your Windows
-machine** (not the SSH session):
+The code is on GitHub at https://github.com/parols-git/kertoons - clone it
+directly on the Droplet:
 
 ```bash
-scp -r "C:/claude_code/kertoons/kertoons-app" root@YOUR_DROPLET_IP:/opt/kertoons-app
+su - kertoons
+git clone https://github.com/parols-git/kertoons.git /opt/kertoons-app
+exit   # back to root/sudo user
 ```
 
-This copies everything, including `.env` (with your real keys) and the
-current `kertoons_data.json`/`generated/` if you want to bring existing data
-along. If you'd rather start with a clean slate on the server, delete
-`kertoons_data.json` and empty `generated/` locally before running `scp`, or
-just remove them on the server afterward (`rm` the file, `rm -rf` the
-contents of `generated/`) - `server.py` recreates both automatically on
-first use.
+The repo's `.gitignore` deliberately excludes `.env`, `kertoons_data.json`,
+and `generated/` (your real keys and user data never touch GitHub) - you'll
+create `.env` fresh in step 6, and `kertoons_data.json`/`generated/` are
+created automatically by `server.py` on first use.
 
-*(If you'd prefer a repeatable, versioned deploy instead of one-off `scp`:
-push this folder to a private GitHub repo first, then on the Droplet run
-`git clone <your-repo-url> /opt/kertoons-app`. Same result, easier to update
-later with `git pull`.)*
-
-Back in your SSH session, fix ownership so the `kertoons` user can run it:
-
-```bash
-chown -R kertoons:kertoons /opt/kertoons-app
-```
+Ownership is already correct since you cloned it as the `kertoons` user
+directly - no `chown` needed. To update the app later, just
+`git pull && systemctl restart kertoons` on the Droplet (see "Updating the
+app later" below).
 
 ## 5. Python environment and dependencies
 
@@ -187,10 +179,10 @@ Your site is now `https://yourdomain.com`.
 
 ---
 
-## Mounting under an existing site (`kertoons.com/story`)
+## Mounting under an existing site (`kertoons.com/stories`)
 
 If `kertoons.com` is already live on nginx (e.g. from following steps 1-3
-above previously) and you want to add this app at `kertoons.com/story`
+above previously) and you want to add this app at `kertoons.com/stories`
 **instead of** giving it the whole domain, do this instead of steps 4, 6, 8,
 and 9:
 
@@ -198,23 +190,27 @@ and 9:
 relative** (`static/nav.js`, `api/story/view?...`, etc. - never a leading
 `/`), specifically so it works correctly no matter what path prefix it's
 served under. You don't need to configure a "base path" anywhere in the
-app itself - nginx stripping the `/story/` prefix before forwarding is the
+app itself - nginx stripping the `/stories/` prefix before forwarding is the
 only piece that needs to know about it.
 
-1. **Get the code onto the server**, same as step 4, but into its own
-   directory alongside your existing site rather than replacing it:
+1. **Get the code onto the server**, same as step 4 above (`git clone`),
+   but into its own directory alongside your existing site rather than
+   replacing it:
    ```bash
-   # from Windows:
-   scp -r "C:/claude_code/kertoons/kertoons-app" root@YOUR_SERVER_IP:/opt/kertoons-app
-   # on the server:
-   chown -R kertoons:kertoons /opt/kertoons-app   # create the "kertoons" user first if you haven't (step 2)
+   su - kertoons
+   git clone https://github.com/parols-git/kertoons.git /opt/kertoons-app
+   exit
    ```
+   (create the `kertoons` user first if you haven't - step 2 above)
 
 2. **Python environment, dependencies, and `.env`** - identical to steps 5
    and 6 above (a venv, `pip install -r requirements.txt`, fill in your API
    keys; leave `HOST=127.0.0.1` and `PORT=8765` unless that port is already
    taken by something else on this server, in which case pick a free one and
-   use the same value in step 4 below).
+   use the same value in step 4 below). Set
+   `PUBLIC_BASE_URL=https://kertoons.com/stories` in `.env` - required for
+   Stripe Checkout's redirect URLs, and used by the share-page feature to
+   build correct absolute links.
 
 3. **systemd service** - identical to step 7 above
    (`deploy/kertoons.service`, `systemctl enable --now kertoons`). This app
@@ -229,15 +225,15 @@ only piece that needs to know about it.
    file it's in), and paste the two `location` blocks from that file inside
    the existing `server { ... }` block (anywhere alongside its other
    `location` blocks - order relative to a `location /` block for the main
-   site doesn't matter here, since `/story/` is more specific and nginx
+   site doesn't matter here, since `/stories/` is more specific and nginx
    always prefers the longest matching prefix).
    ```bash
    nano /etc/nginx/sites-available/kertoons.com   # paste the two location blocks in
    nginx -t && systemctl reload nginx
    ```
 
-5. **Verify**: open `https://kertoons.com/story/` (note the trailing slash -
-   `https://kertoons.com/story` without it will redirect there
+5. **Verify**: open `https://kertoons.com/stories/` (note the trailing
+   slash - `https://kertoons.com/stories` without it will redirect there
    automatically) and confirm the existing `kertoons.com` site is completely
    unaffected.
 
@@ -271,8 +267,8 @@ is just configuration.
 3. **Register a webhook endpoint**: https://dashboard.stripe.com/webhooks →
    "Add endpoint".
    - Endpoint URL: `https://yourdomain.com/api/stripe/webhook` (or
-     `https://yourdomain.com/story/api/stripe/webhook` if mounted under an
-     existing site's `/story` path).
+     `https://kertoons.com/stories/api/stripe/webhook` if mounted under an
+     existing site's `/stories` path).
    - Events to send: select **`checkout.session.completed`** (only that one
      is needed).
    - After creating it, click into the endpoint and copy its **Signing
@@ -308,21 +304,20 @@ constants at the top of `story_engine/payments.py`
 
 ## Updating the app later
 
-Whenever you make changes locally and want to push them live:
+Push your changes to GitHub from Windows as usual (`git push`), then on the
+Droplet:
 
 ```bash
-# from Windows:
-scp -r "C:/claude_code/kertoons/kertoons-app/story_engine" root@YOUR_DROPLET_IP:/opt/kertoons-app/
-scp -r "C:/claude_code/kertoons/kertoons-app/static" root@YOUR_DROPLET_IP:/opt/kertoons-app/
-scp "C:/claude_code/kertoons/kertoons-app/server.py" root@YOUR_DROPLET_IP:/opt/kertoons-app/
-# then on the Droplet:
-ssh root@YOUR_DROPLET_IP "chown -R kertoons:kertoons /opt/kertoons-app && systemctl restart kertoons"
+su - kertoons
+cd /opt/kertoons-app
+git pull
+venv/bin/pip install -r requirements.txt   # only needed if requirements.txt changed
+exit
+systemctl restart kertoons
 ```
 
-(Deliberately not re-copying `.env`, `kertoons_data.json`, or `generated/` -
-those hold live secrets/data you don't want to overwrite from your local
-copy.) If you set up the git-based deploy instead, this is just
-`git pull && systemctl restart kertoons` on the Droplet.
+`.env`, `kertoons_data.json`, and `generated/` are all git-ignored, so
+`git pull` never touches your live secrets or user data.
 
 ## Backups
 
