@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Admin - Kertoons</title>
+<link rel="stylesheet" href="static/style.css">
+</head>
+<body>
+<header>
+  <h1>🧸 Kertoons</h1>
+  <nav id="nav-bar" class="nav-bar"></nav>
+</header>
+
+<main>
+  <div id="admin-banner" class="banner"></div>
+
+  <section id="not-admin" class="card" style="display:none;">
+    <p>Admin access required.</p>
+  </section>
+
+  <section id="admin-panel" style="display:none;">
+    <section class="card">
+      <div class="usage-header">
+        <h2>Users</h2>
+      </div>
+      <form id="create-user-form" class="admin-inline-form">
+        <input type="text" id="new-user-username" placeholder="Username" required>
+        <input type="password" id="new-user-password" placeholder="Password (min 6 chars)" required>
+        <button type="submit" class="btn-secondary">Create user</button>
+      </form>
+      <div id="users-table-wrap"></div>
+      <a class="btn-outline" href="api/admin/users/export">⬇ Download all users (CSV)</a>
+    </section>
+
+    <section class="card">
+      <h2>Stories</h2>
+      <p class="hint">Publish, unpublish, or delete any user's story.</p>
+      <div id="stories-table-wrap"></div>
+    </section>
+
+    <section class="card">
+      <h2>Coupons</h2>
+      <form id="create-coupon-form" class="admin-inline-form">
+        <input type="text" id="new-coupon-code" placeholder="Coupon code" required>
+        <input type="number" id="new-coupon-credits" placeholder="Credits" min="1" required>
+        <button type="submit" class="btn-secondary">Create coupon</button>
+      </form>
+      <div id="coupons-table-wrap"></div>
+    </section>
+
+    <section class="card">
+      <h2>Reports</h2>
+      <div id="reports-summary"></div>
+      <div id="reports-coupons-wrap"></div>
+    </section>
+  </section>
+</main>
+
+<script src="static/nav.js"></script>
+<script src="static/admin.js"></script>
+
+<footer class="site-footer">
+  <p><a href="faq.html">FAQ</a> · <a href="help.html">Help</a> ·
+  <a href="https://kertoons.com" target="_blank" rel="noopener">kertoons.com</a> - Another Elisda AI project</p>
+</footer>
+</body>
+</html>

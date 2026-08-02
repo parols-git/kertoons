@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Create a story - Kertoons</title>
+<link rel="stylesheet" href="static/style.css">
+</head>
+<body>
+<header>
+  <h1>🧸 Kertoons</h1>
+  <p>Warm, safe, region-based cartoon stories for kids aged 5-12</p>
+  <nav id="nav-bar" class="nav-bar"></nav>
+</header>
+
+<div id="mode-banner" class="banner mock"></div>
+
+<main>
+  <div id="error-box"></div>
+
+  <section id="login-required" class="card" style="display:none;">
+    <p>You need to <a href="login.html">log in</a> or <a href="register.html">create an account</a> to write a Kertoons story.</p>
+  </section>
+
+  <section class="card" id="create-form-card">
+    <form id="story-form">
+      <label for="initial_text">Story idea (2-3 sentences)</label>
+      <textarea id="initial_text" rows="3" placeholder="A curious kid and their pet find a lost baby bird and help it get home..." required></textarea>
+
+      <div class="row">
+        <div>
+          <label for="region">Region / setting</label>
+          <input type="text" id="region" placeholder="e.g. Kerala, India / a snowy mountain village">
+        </div>
+        <div>
+          <label for="secondary_language">Also translate into (optional, comma-separate for more than one)</label>
+          <input type="text" id="secondary_language" placeholder="e.g. Hindi, Tamil, Spanish">
+          <p class="hint">Each language gets its own downloadable storybook PDF.</p>
+        </div>
+      </div>
+
+      <label for="character_photo">Optional: upload a photo for character inspiration</label>
+      <input type="file" id="character_photo" accept="image/*">
+      <p class="hint">Never used to identify anyone - only turned into a generic, kid-safe cartoon-style description.</p>
+
+      <button type="submit" class="btn-primary" id="submit-btn">Create my Kertoons story ✨</button>
+      <p class="hint credit-warning" id="credit-warning" style="display:none;">
+        You're out of image credits. Click "➕ Add credits" up next to your balance above to keep creating stories.
+      </p>
+    </form>
+  </section>
+
+  <section id="progress-section" class="card">
+    <strong id="progress-title">Creating your story...</strong>
+    <div class="progress-bar-track"><div class="progress-bar-fill" id="progress-fill"></div></div>
+    <div id="progress-message"></div>
+  </section>
+
+  <section id="book-section"></section>
+
+  <section id="my-stories-section" class="card" style="display:none;">
+    <h3>My Stories</h3>
+    <div id="my-stories-list"></div>
+  </section>
+</main>
+
+<script src="static/nav.js"></script>
+<script src="static/book.js"></script>
+<script src="static/create.js"></script>
+
+<footer class="site-footer">
+  <p><a href="faq.html">FAQ</a> · <a href="help.html">Help</a> ·
+  <a href="https://kertoons.com" target="_blank" rel="noopener">kertoons.com</a> - Another Elisda AI project</p>
+</footer>
+</body>
+</html>

@@ -1,0 +1,30 @@
+# systemd unit for running Kertoons as a persistent, auto-restarting service.
+#
+# Install (on the Droplet, as root/sudo):
+#   sudo cp deploy/kertoons.service /etc/systemd/system/kertoons.service
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now kertoons
+#
+# The paths below assume the app lives at /opt/kertoons-app and runs as a
+# dedicated "kertoons" user - see DEPLOY.md for the full setup that creates
+# both. Adjust User/WorkingDirectory/ExecStart if you used different paths.
+
+[Unit]
+Description=Kertoons story generator
+After=network.target
+
+[Service]
+Type=simple
+User=kertoons
+Group=kertoons
+WorkingDirectory=/opt/kertoons-app
+ExecStart=/opt/kertoons-app/venv/bin/python /opt/kertoons-app/server.py
+Restart=always
+RestartSec=3
+
+# Hardening: the service only needs to read/write its own app directory.
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

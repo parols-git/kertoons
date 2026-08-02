@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Image usage - Kertoons</title>
+<link rel="stylesheet" href="static/style.css">
+</head>
+<body>
+<header>
+  <h1>🧸 Kertoons</h1>
+  <nav id="nav-bar" class="nav-bar"></nav>
+</header>
+
+<main>
+  <div id="error-box"></div>
+  <div id="checkout-banner" class="banner"></div>
+
+  <section id="login-required" class="card" style="display:none;">
+    <p>You need to <a href="login.html">log in</a> to see your image usage.</p>
+  </section>
+
+  <section id="usage-card" class="card" style="display:none;">
+    <div class="usage-header">
+      <h2>Image usage</h2>
+      <div class="credits-pill" id="credits-pill"></div>
+    </div>
+    <p class="hint">Every image generated for a new story, or via "Regenerate image", uses one
+    credit. New accounts start with 50.</p>
+    <form id="redeem-coupon-form" class="admin-inline-form">
+      <input type="text" id="coupon-code-input" placeholder="Coupon code" required>
+      <button type="submit" class="btn-secondary">Redeem coupon</button>
+    </form>
+    <div id="usage-table-wrap"></div>
+  </section>
+
+  <section id="payments-card" class="card" style="display:none;">
+    <h2>Payment history</h2>
+    <p class="hint">Every successful "Add credits" purchase appears here.</p>
+    <div id="payments-table-wrap"></div>
+  </section>
+</main>
+
+<script src="static/nav.js"></script>
+<script src="static/usage.js"></script>
+
+<footer class="site-footer">
+  <p><a href="faq.html">FAQ</a> · <a href="help.html">Help</a> ·
+  <a href="https://kertoons.com" target="_blank" rel="noopener">kertoons.com</a> - Another Elisda AI project</p>
+</footer>
+</body>
+</html>

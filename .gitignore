@@ -1,0 +1,20 @@
+# Real secrets - never commit. Use .env.example as the template.
+.env
+
+# User accounts, sessions, story ownership/publish state, coupons - real
+# runtime data, not source.
+kertoons_data.json
+
+# Generated stories (images, PDFs, ZIPs) - user content, not source, and
+# large. Keep the directory tracked but not its contents.
+generated/*
+!generated/.gitkeep
+
+# Python
+__pycache__/
+*.pyc
+venv/
+.venv/
+
+# Editor/OS cruft
+.DS_Store

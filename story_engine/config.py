@@ -1,0 +1,116 @@
+"""
+Configuration & environment loading for the Kertoons app.
+
+Reads a .env file (if present) and exposes the API keys / mode flags used
+throughout the app. If the required API keys are missing, the app
+automatically falls back to MOCK MODE so the whole pipeline can be built,
+run, and tested locally without needing real OpenAI / image-API credentials.
+"""
+import os
+
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except Exception:
+    pass  # dotenv is optional; env vars can also be set directly
+
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "").strip()
+OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
+
+# Translation runs through Gemini instead of OpenAI (story generation and the
+# character-photo vision description stay on OpenAI - see openai_client.py).
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
+# "-latest" alias (rather than a pinned version like "gemini-2.0-flash")
+# since Google retires pinned model versions over time and a hardcoded one
+# 404s once retired - the alias always points at Google's current
+# recommended flash model instead.
+GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-flash-latest")
+
+# The product spec refers to an image API at "Deepak.org". No such API
+# could be found; the near-identical, real service is DeepAI (deepai.org),
+# which offers a text2img / 3D-cartoon-style image API. This app targets
+# DeepAI by default under the DEEPAI_API_KEY name. If you actually have a
+# different "Deepak.org" endpoint, set DEEPAI_BASE_URL accordingly and the
+# image client will call that instead - see story_engine/image_client.py.
+DEEPAI_API_KEY = os.environ.get("DEEPAI_API_KEY", "").strip()
+DEEPAI_BASE_URL = os.environ.get("DEEPAI_BASE_URL", "https://api.deepai.org/api/text2img")
+
+# Selling image credits - via Stripe Checkout (a Stripe-hosted payment page,
+# so this app never sees/touches card details). STRIPE_WEBHOOK_SECRET comes
+# from the webhook endpoint you register in the Stripe dashboard pointing at
+# this app's /api/stripe/webhook - see DEPLOY.md for the full setup. This is
+# the ONLY thing that actually grants credits when using a Payment Link
+# (below) - without it, purchases succeed on Stripe's side but nobody ever
+# gets credited, so treat it as required, not optional, once real payments
+# are enabled.
+STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "").strip()
+
+# Two ways to sell the credit pack - set at most one:
+#   1. STRIPE_PAYMENT_LINK - a pre-made, no-code checkout URL from
+#      https://dashboard.stripe.com/payment-links ("+ New"). Simplest -
+#      "Add credits" just redirects to it (with ?client_reference_id=<user
+#      id> appended so the webhook can tell whose payment it was) - no
+#      STRIPE_SECRET_KEY needed at all for this path. Preferred over #2
+#      whenever both are set.
+#   2. STRIPE_SECRET_KEY - dynamically creates a Checkout Session per
+#      purchase via Stripe's API (see payments.create_checkout_session).
+#      More flexible (e.g. multiple price tiers later) but needs a real API
+#      key from https://dashboard.stripe.com/apikeys. Also still used by
+#      /api/credits/confirm (the immediate on-return confirmation) even when
+#      #1 is active, if you want that - see PUBLIC_BASE_URL below.
+# Get either from Stripe test mode first (test-mode Payment Links exist too,
+# and "sk_test_..." keys) to try the whole flow with Stripe's documented
+# test card 4242 4242 4242 4242 before ever going live.
+STRIPE_PAYMENT_LINK = os.environ.get("STRIPE_PAYMENT_LINK", "").strip()
+STRIPE_SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY", "").strip()
+
+# The absolute, public URL this app is reachable at - needed because Stripe
+# Checkout requires absolute (not relative) success/cancel URLs. If mounted
+# under a path on an existing site (see DEPLOY.md's "Mounting under an
+# existing site"), the app itself has no way to know that prefix (nginx
+# strips it before forwarding - see deploy/nginx_kertoons_subpath.conf), so
+# it must be told explicitly here, e.g. PUBLIC_BASE_URL=https://kertoons.com/story
+PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "").strip()
+
+# Force mock mode regardless of keys (useful for local testing/demo)
+FORCE_MOCK = os.environ.get("FORCE_MOCK", "").strip().lower() in ("1", "true", "yes")
+
+MOCK_STORY = FORCE_MOCK or not OPENAI_API_KEY
+MOCK_TRANSLATION = FORCE_MOCK or not GEMINI_API_KEY
+MOCK_IMAGES = FORCE_MOCK or not DEEPAI_API_KEY
+# Mock payments grant the credit pack for free instantly (clearly labeled as
+# a demo in the UI) instead of redirecting to a real Stripe Checkout page -
+# same fallback pattern as the other three, so the whole app (including
+# "buying" credits) is testable with zero paid services configured.
+MOCK_PAYMENTS = FORCE_MOCK or not (STRIPE_PAYMENT_LINK or STRIPE_SECRET_KEY)
+
+PAGE_COUNT = 5
+
+HOST = os.environ.get("HOST", "127.0.0.1")
+PORT = int(os.environ.get("PORT", "8765"))
+
+if not PUBLIC_BASE_URL:
+    PUBLIC_BASE_URL = f"http://{HOST}:{PORT}"
+
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+STATIC_DIR = os.path.join(BASE_DIR, "static")
+
+# Both overridable via env var so a throwaway server instance (used to
+# verify a change in a browser/tests) can point at a fully isolated
+# scratch location instead of ever touching real user data or generated
+# stories - see KERTOONS_DB_PATH / KERTOONS_GENERATED_DIR.
+GENERATED_DIR = os.environ.get("KERTOONS_GENERATED_DIR", os.path.join(BASE_DIR, "generated"))
+
+# User accounts / sessions / story ownership - a single JSON file rather than a
+# real database engine (see story_engine/db.py), simple enough at this app's
+# scale (a handful of users, dozens of stories) that a real DB isn't needed.
+DB_PATH = os.environ.get("KERTOONS_DB_PATH", os.path.join(BASE_DIR, "kertoons_data.json"))
+
+# If both are set, an admin account is auto-created (or left alone if it
+# already exists) on every server startup - see db.create_admin_if_missing().
+# Leave blank to disable the admin panel entirely, same "blank disables it"
+# convention as the mock-mode flags above.
+ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME", "").strip()
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "").strip()
+
+os.makedirs(GENERATED_DIR, exist_ok=True)
