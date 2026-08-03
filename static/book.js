@@ -113,6 +113,16 @@ function _setPdfStatus(text, variant) {
   el.className = variant ? `banner show ${variant}` : "banner";
 }
 
+// "High quality" embeds every illustration at a true 300 DPI (print-ready,
+// larger/slower); "low quality" resizes them to a ~96 DPI screen target
+// instead (smaller/faster, meant for on-screen reading only) - see
+// book_export.py's `quality` param. Whichever radio is checked applies to
+// every "Download ... PDF" button, not just the one clicked.
+function _selectedPdfQuality() {
+  const checked = document.querySelector('input[name="pdf-quality"]:checked');
+  return checked ? checked.value : "high";
+}
+
 // Fetches the PDF via JS (rather than a plain window.open(url)) so a status
 // bar can track the request's lifecycle - "Generating a story's images are
 // high-resolution (300 DPI) since a request was made for print-quality
@@ -123,13 +133,19 @@ function _setPdfStatus(text, variant) {
 async function downloadPdf(btn, language, label) {
   if (!_bookState) return;
   const { jobId } = _bookState;
+  const quality = _selectedPdfQuality();
   const originalLabel = btn.textContent;
   btn.disabled = true;
   btn.textContent = "Generating...";
-  _setPdfStatus(`⏳ Generating the ${label} PDF... this can take a moment for print-quality (300 DPI) art.`, "info");
+  _setPdfStatus(
+    quality === "low"
+      ? `⏳ Generating the ${label} PDF (low quality, smaller file)...`
+      : `⏳ Generating the ${label} PDF... this can take a moment for print-quality (300 DPI) art.`,
+    "info",
+  );
 
   try {
-    const res = await fetch(`api/story/download?job_id=${jobId}&format=pdf&language=${encodeURIComponent(language)}`);
+    const res = await fetch(`api/story/download?job_id=${jobId}&format=pdf&language=${encodeURIComponent(language)}&quality=${quality}`);
     if (!res.ok) {
       let message = `Failed to generate PDF (HTTP ${res.status})`;
       try { message = (await res.json()).error || message; } catch (e) { /* not JSON - use default */ }
@@ -229,6 +245,11 @@ function renderBook(container, jobId, story, opts = {}) {
         <div>Region: ${escapeHtml(story.region)}</div>
         ${opts.author ? `<div class="author-line">by ${escapeHtml(opts.author)}</div>` : ""}
         <div class="moral">"${escapeHtml(story.moral)}"</div>
+      </div>
+      <div class="pdf-quality-row">
+        <span class="pdf-quality-label">PDF quality:</span>
+        <label><input type="radio" name="pdf-quality" value="high" checked> High (print, 300 DPI)</label>
+        <label><input type="radio" name="pdf-quality" value="low"> Low (screen, smaller file)</label>
       </div>
       <div class="download-row">
         ${pdfButtons}

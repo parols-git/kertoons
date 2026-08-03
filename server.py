@@ -576,6 +576,9 @@ class Handler(BaseHTTPRequestHandler):
                 job_id = qs.get("job_id", [None])[0]
                 fmt = qs.get("format", ["zip"])[0]
                 language = qs.get("language", [None])[0]
+                quality = (qs.get("quality", ["high"])[0] or "high").strip().lower()
+                if quality not in ("high", "low"):
+                    quality = "high"
                 if not job_id or not self._can_view(job_id):
                     self._send_error_json("story not found", 404)
                     return
@@ -588,7 +591,11 @@ class Handler(BaseHTTPRequestHandler):
                 if fmt == "pdf":
                     is_english = not language or language.strip().lower() in ("en", "english", "original")
                     suffix = "_en" if is_english else "_" + re.sub(r"[^A-Za-z0-9]+", "_", language.strip().lower())
-                    self._send_bytes(build_pdf(job_dir, language=language), "application/pdf", f"{title}{suffix}.pdf")
+                    if quality == "low":
+                        suffix += "_web"
+                    self._send_bytes(
+                        build_pdf(job_dir, language=language, quality=quality),
+                        "application/pdf", f"{title}{suffix}.pdf")
                 else:
                     self._send_bytes(build_zip(job_dir), "application/zip", f"{title}.zip")
                 return

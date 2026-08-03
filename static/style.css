@@ -253,6 +253,19 @@ button {
 .book-header h2 { margin: 0 0 4px; }
 .book-header .moral { font-style: italic; color: var(--muted); }
 
+.pdf-quality-row {
+  display: flex;
+  gap: 16px;
+  justify-content: center;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 14px;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+.pdf-quality-row label { display: flex; align-items: center; gap: 5px; cursor: pointer; }
+.pdf-quality-label { font-weight: 600; color: var(--ink); }
+
 .download-row {
   display: flex;
   gap: 12px;

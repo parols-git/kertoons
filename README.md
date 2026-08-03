@@ -98,6 +98,21 @@ in flight, a success banner once the browser's own download is triggered
 actual error message on failure. The download itself still uses the
 server's real filename (`Content-Disposition`) rather than a guessed one.
 
+## PDF print quality (high) vs. screen quality (low)
+
+A "High (print, 300 DPI)" / "Low (screen, smaller file)" radio choice sits
+above the download row (`static/book.js`) and is sent as
+`&quality=high|low` on `GET /api/story/download`. "High" (the default) is
+the existing 300 DPI upscale behavior; "Low" resizes every illustration
+(up **or** down) to a ~96 DPI screen target instead - a real illustration
+tested at ~1.9MB (high) vs. ~310KB (low), roughly a 6x reduction, since low
+quality actively downscales large images rather than just capping how much
+they're allowed to grow. Both tiers are implemented as one function,
+`story_engine/book_export.py`'s `_quality_reader(img_path, quality)`; an
+unrecognized `quality` value falls back to `"high"`. The low-quality
+filename gets a `_web` suffix so the two downloads for the same story never
+collide on disk.
+
 ## Image credits & buying more
 
 Every image generated (a story's initial 5 pages, or any "Regenerate image"

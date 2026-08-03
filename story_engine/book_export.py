@@ -352,32 +352,44 @@ def _draw_page_chrome(c, W, H, bg_rgb, accent_rgb, brand_label, contact_email=No
 # to the print box size - so a PDF's effective print DPI is just
 # native_pixels / (print_size_in_points / 72). The story illustration is
 # drawn at up to 482pt (letter width minus its 65pt margins on each side,
-# see `img_w` below) = ~6.69in, so a 300 DPI print needs a source image at
-# least ~2008px on a side. Both the mock generator and the real DeepAI API
-# may return something smaller than that (DeepAI's text2img default is well
-# under 1024px), so every embedded image is upscaled - never downscaled -
-# to this floor with high-quality Lanczos resampling before being drawn.
+# see `img_w` below) = ~6.69in. Two quality tiers (see build_pdf's `quality`
+# param):
+#   - "high" (default): upscaled - never downscaled - to a true 300 DPI
+#     floor. Both the mock generator and the real DeepAI API may return
+#     something smaller than that (DeepAI's text2img default is well under
+#     1024px), so this is what makes a "print quality" download meaningful.
+#   - "low": resized (up OR down) to a screen-resolution ~96 DPI target -
+#     deliberately downscales a large source image too, trading print
+#     quality for a much smaller, faster-to-generate file meant for
+#     on-screen reading, not printing.
 _PRINT_DPI = 300
+_SCREEN_DPI = 96
 _PRINT_TARGET_PX = round((letter[0] - 2 * 65) / 72 * _PRINT_DPI)  # ~2008px
+_SCREEN_TARGET_PX = round((letter[0] - 2 * 65) / 72 * _SCREEN_DPI)  # ~642px
 
 
-def _print_quality_reader(img_path: str) -> ImageReader:
-    """ImageReader for img_path, upscaled to _PRINT_TARGET_PX first if its
-    native resolution is smaller - so the PDF prints at a true 300 DPI
-    regardless of what resolution the image API actually returned. An
-    already-larger source image passes through unchanged (never
-    downsampled, so no quality loss if a future image API returns more)."""
+def _quality_reader(img_path: str, quality: str = "high") -> ImageReader:
+    """ImageReader for img_path, resized to the requested quality tier's
+    pixel-density target. "high" never downsamples an already-larger
+    source (no quality loss if a future image API returns more); "low"
+    always resizes to its (smaller) target, since the point there is
+    shrinking the file, not just capping how much it grows."""
+    target_px = _PRINT_TARGET_PX if quality == "high" else _SCREEN_TARGET_PX
     with Image.open(img_path) as im:
         im = im.convert("RGB")
-        if im.width < _PRINT_TARGET_PX or im.height < _PRINT_TARGET_PX:
-            im = im.resize((_PRINT_TARGET_PX, _PRINT_TARGET_PX), Image.LANCZOS)
+        needs_resize = (
+            (im.width < target_px or im.height < target_px) if quality == "high"
+            else (im.width != target_px or im.height != target_px)
+        )
+        if needs_resize:
+            im = im.resize((target_px, target_px), Image.LANCZOS)
         buf = io.BytesIO()
         im.save(buf, format="PNG")
     buf.seek(0)
     return ImageReader(buf)
 
 
-def _draw_polaroid(c, img_path: str, cx: float, cy: float, size: float, angle_deg: float):
+def _draw_polaroid(c, img_path: str, cx: float, cy: float, size: float, angle_deg: float, quality: str = "high"):
     """Draw one square illustration as a small rotated, white-bordered
     'photo' centered at (cx, cy) - used up to 3 at a time, overlapping, to
     build the cover's scattered scrapbook-style collage."""
@@ -400,7 +412,7 @@ def _draw_polaroid(c, img_path: str, cx: float, cy: float, size: float, angle_de
 
     inner = size - border * 2
     c.drawImage(
-        _print_quality_reader(img_path), -size / 2 + border, -size / 2 + border,
+        _quality_reader(img_path, quality), -size / 2 + border, -size / 2 + border,
         width=inner, height=inner, preserveAspectRatio=True, anchor="c",
     )
     c.restoreState()
@@ -497,12 +509,20 @@ def build_zip(job_dir: str) -> bytes:
     return buf.getvalue()
 
 
-def build_pdf(job_dir: str, language: str = None) -> bytes:
+def build_pdf(job_dir: str, language: str = None, quality: str = "high") -> bytes:
     """Build ONE storybook PDF. `language=None` (or "en"/"english") builds
     the original English book. Any other value must match a language the
     story was translated into (story["languages"]) and builds a book using
     ONLY that language's text - a separate, standalone book per language,
-    not English-plus-translation on the same page."""
+    not English-plus-translation on the same page.
+
+    `quality`: "high" (default) - print-ready, every illustration upscaled
+    to a true 300 DPI floor (see _quality_reader) - or "low" - every
+    illustration resized to a ~96 DPI screen target instead, for a much
+    smaller/faster file meant for on-screen reading, not printing. Any
+    other value falls back to "high"."""
+    if quality not in ("high", "low"):
+        quality = "high"
     with open(os.path.join(job_dir, "story.json"), "r", encoding="utf-8") as f:
         story = json.load(f)
 
@@ -590,7 +610,7 @@ def build_pdf(job_dir: str, language: str = None) -> bytes:
     ]
     for img_path, (cx, cy, size, angle) in zip(chosen_images, _COLLAGE_LAYOUT):
         try:
-            _draw_polaroid(c, img_path, cx, cy, size, angle)
+            _draw_polaroid(c, img_path, cx, cy, size, angle, quality)
         except Exception:
             continue
 
@@ -657,7 +677,7 @@ def build_pdf(job_dir: str, language: str = None) -> bytes:
         c.roundRect(margin + 4, img_y - 4, img_w, img_h, 10, fill=1, stroke=0)
 
         if os.path.exists(img_path):
-            c.drawImage(_print_quality_reader(img_path), margin, img_y, width=img_w, height=img_h,
+            c.drawImage(_quality_reader(img_path, quality), margin, img_y, width=img_w, height=img_h,
                         preserveAspectRatio=True, anchor="n")
         else:
             c.setFillColorRGB(0.9, 0.9, 0.9)
