@@ -67,7 +67,7 @@ __PAGES_HTML__
 
 <footer class="site-footer">
   <p><a href="faq.html">FAQ</a> · <a href="help.html">Help</a> ·
-  <span id="site-footer-text">__FOOTER_TEXT__</span></p>
+  <span id="site-footer-text">__FOOTER_TEXT__</span><span id="footer-contact-email-wrap" style="display:none;"> · <a id="footer-contact-email-link" href="#"><span id="footer-contact-email"></span></a></span><span id="footer-contact-phone-wrap" style="display:none;"> · <span id="footer-contact-phone"></span></span></p>
 </footer>
 </body>
 </html>

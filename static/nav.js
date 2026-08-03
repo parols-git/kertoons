@@ -48,24 +48,38 @@ function _applyFooterText(footerText) {
 }
 
 // Contact info is opt-in (see db.DEFAULT_CONTACT_EMAIL/_PHONE, both blank
-// by default) - only shown on faq.html's #contact-card, and only the
-// email/phone rows that actually have a value, rather than a
-// half-empty-looking "Contact us" card if only one is set.
+// by default) - shown on faq.html's #contact-card AND in every page's
+// footer (see the site-footer-text span), each with its email/phone piece
+// independently hidden if that particular field is blank rather than
+// showing an empty line/separator.
 function _applyContactInfo(email, phone) {
   const card = document.getElementById("contact-card");
-  if (!card) return;
-  const emailRow = document.getElementById("contact-email-row");
-  const phoneRow = document.getElementById("contact-phone-row");
-  if (email && emailRow) {
-    document.getElementById("contact-email").textContent = email;
-    document.getElementById("contact-email-link").href = `mailto:${email}`;
-    emailRow.style.display = "block";
+  if (card) {
+    const emailRow = document.getElementById("contact-email-row");
+    const phoneRow = document.getElementById("contact-phone-row");
+    if (email && emailRow) {
+      document.getElementById("contact-email").textContent = email;
+      document.getElementById("contact-email-link").href = `mailto:${email}`;
+      emailRow.style.display = "block";
+    }
+    if (phone && phoneRow) {
+      document.getElementById("contact-phone").textContent = phone;
+      phoneRow.style.display = "block";
+    }
+    if (email || phone) card.style.display = "block";
   }
-  if (phone && phoneRow) {
-    document.getElementById("contact-phone").textContent = phone;
-    phoneRow.style.display = "block";
+
+  const footerEmailWrap = document.getElementById("footer-contact-email-wrap");
+  if (email && footerEmailWrap) {
+    document.getElementById("footer-contact-email").textContent = email;
+    document.getElementById("footer-contact-email-link").href = `mailto:${email}`;
+    footerEmailWrap.style.display = "inline";
   }
-  if (email || phone) card.style.display = "block";
+  const footerPhoneWrap = document.getElementById("footer-contact-phone-wrap");
+  if (phone && footerPhoneWrap) {
+    document.getElementById("footer-contact-phone").textContent = phone;
+    footerPhoneWrap.style.display = "inline";
+  }
 }
 
 async function renderNav() {
