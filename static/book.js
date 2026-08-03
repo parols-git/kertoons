@@ -163,12 +163,16 @@ async function downloadPdf(btn, language, label) {
   const { jobId } = _bookState;
   const quality = _selectedPdfQuality();
   const langKey = _pdfAvailabilityKey(language);
+  const avail = _bookState.pdfAvailable && _bookState.pdfAvailable[langKey];
+  const wasAvailable = !!(avail && avail[quality]);
   btn.disabled = true;
-  btn.textContent = "Generating...";
+  btn.textContent = wasAvailable ? "Downloading..." : "Generating...";
   _setPdfStatus(
-    quality === "low"
-      ? `⏳ Generating the ${label} PDF (low quality, smaller file)...`
-      : `⏳ Generating the ${label} PDF... this can take a moment for print-quality (300 DPI) art.`,
+    wasAvailable
+      ? `⏳ Downloading the ${label} PDF...`
+      : quality === "low"
+        ? `⏳ Generating the ${label} PDF (low quality, smaller file)...`
+        : `⏳ Generating the ${label} PDF... this can take a moment for print-quality (300 DPI) art.`,
     "info",
   );
 
