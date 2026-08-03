@@ -158,13 +158,17 @@ trust a client-reported role). From there an admin can:
   (`story_engine/book_export.py` - cover subtitle, closing line, and the
   branded footer link on every page).
 - Optionally set a **contact email/phone** - blank by default, so nothing
-  extra appears anywhere until an admin sets at least one. Shown in two
-  places: `faq.html`'s `#contact-card`, and appended to every page's footer
-  (`#footer-contact-email-wrap`/`#footer-contact-phone-wrap`) right after
-  the footer text. Each of the four spans is independently hidden if that
-  particular field is blank, rather than showing an empty line/separator.
-  A submitted email is only checked for a plausible shape (contains `@`) -
-  not fully RFC-validated.
+  extra appears anywhere until an admin sets at least one. Shown in three
+  places: `faq.html`'s `#contact-card`, appended to every page's HTML
+  footer (`#footer-contact-email-wrap`/`#footer-contact-phone-wrap`) right
+  after the footer text, and in the exported **PDF**'s branded footer
+  (`story_engine/book_export.py`'s `_draw_footer()`) - each present field
+  becomes its own separately clickable segment (site name → the site link,
+  email → a real `mailto:` link, phone → a `tel:` link with everything but
+  digits/`+` stripped). Every occurrence independently omits whichever
+  field is blank, rather than showing an empty line/separator. A submitted
+  email is only checked for a plausible shape (contains `@`) - not fully
+  RFC-validated.
 
 ## The Storytelling Expert skill (used for every story)
 

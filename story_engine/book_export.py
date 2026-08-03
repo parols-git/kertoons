@@ -7,6 +7,7 @@ PDF/ZIP ... real cartoon storybook with images and text in specified
 language."
 """
 import os
+import re
 import json
 import zipfile
 import io
@@ -230,35 +231,54 @@ def _draw_sparkle(c, x, y, rgb, size=5.5):
     c.restoreState()
 
 
-def _draw_footer(c, W, accent_rgb, brand_label):
+def _draw_footer(c, W, accent_rgb, brand_label, contact_email=None, contact_phone=None):
     """Brand line on every page, centered at the bottom, drawn AND wired up
-    as a real clickable PDF hyperlink to kertoons.com. Sits on a small
-    opaque white pill so it stays legible regardless of what's behind it -
-    a flat pastel page, or a busy full-bleed cover illustration.
-    `brand_label` is the admin's configured site name (see build_pdf) - the
-    hyperlink target itself (BRAND_URL) is a fixed technical URL, unrelated
-    to that display name."""
+    as real clickable PDF hyperlinks - the site name links to BRAND_URL (a
+    fixed technical URL, unrelated to the display name), an optional
+    contact email to a mailto: link, and an optional contact phone to a
+    tel: link (some PDF viewers don't support tel: links - harmless where
+    unsupported, it just isn't clickable there). Contact info is opt-in
+    (see db.DEFAULT_CONTACT_EMAIL/_PHONE, both blank by default) - omitted
+    entirely from the footer when not set, same as everywhere else contact
+    info appears in this app. Sits on a small opaque white pill so it stays
+    legible regardless of what's behind it - a flat pastel page, or a busy
+    full-bleed cover illustration."""
     font, size = "Helvetica-Oblique", 9.5
-    text_w = c.stringWidth(brand_label, font, size)
-    text_x, text_y = W / 2, 24
+    separator = "   ·   "
+
+    segments = [(brand_label, BRAND_URL)]
+    if contact_email:
+        segments.append((contact_email, f"mailto:{contact_email}"))
+    if contact_phone:
+        tel_digits = re.sub(r"[^0-9+]", "", contact_phone)
+        segments.append((contact_phone, f"tel:{tel_digits}"))
+
+    widths = [c.stringWidth(text, font, size) for text, _ in segments]
+    sep_w = c.stringWidth(separator, font, size)
+    total_w = sum(widths) + sep_w * (len(segments) - 1)
+    text_y = 24
 
     pad_x, pad_y = 10, 5
-    pill_w = text_w + pad_x * 2
+    pill_w = total_w + pad_x * 2
     pill_h = size + pad_y * 2
     c.setFillColorRGB(1, 1, 1)
-    c.roundRect(text_x - pill_w / 2, text_y - pad_y + 1, pill_w, pill_h, pill_h / 2, fill=1, stroke=0)
+    c.roundRect(W / 2 - pill_w / 2, text_y - pad_y + 1, pill_w, pill_h, pill_h / 2, fill=1, stroke=0)
 
     c.setFont(font, size)
     c.setFillColorRGB(*accent_rgb)
-    c.drawCentredString(text_x, text_y, brand_label)
     c.setStrokeColorRGB(*accent_rgb)
     c.setLineWidth(0.6)
-    c.line(text_x - text_w / 2, text_y - 2, text_x + text_w / 2, text_y - 2)
-    c.linkURL(
-        BRAND_URL,
-        (text_x - text_w / 2 - 3, text_y - 5, text_x + text_w / 2 + 3, text_y + size + 2),
-        relative=0,
-    )
+
+    x = W / 2 - total_w / 2
+    for i, (text, url) in enumerate(segments):
+        w = widths[i]
+        c.drawString(x, text_y, text)
+        c.line(x, text_y - 2, x + w, text_y - 2)
+        c.linkURL(url, (x - 2, text_y - 5, x + w + 2, text_y + size + 2), relative=0)
+        x += w
+        if i < len(segments) - 1:
+            c.drawString(x, text_y, separator)
+            x += sep_w
 
 
 def _truncate_to_width(c, text: str, font: str, size: float, max_width: float) -> str:
@@ -299,7 +319,7 @@ def _draw_page_badge(c, W, accent_rgb, label):
     c.drawCentredString(cx, cy - 3.5, label)
 
 
-def _draw_frame_and_footer(c, W, H, accent_rgb, brand_label):
+def _draw_frame_and_footer(c, W, H, accent_rgb, brand_label, contact_email=None, contact_phone=None):
     """Decorative rounded border frame + corner sparkles + the branded
     footer link - everything EXCEPT the background fill, so this can be
     layered on top of either a flat pastel color or a full-bleed cover
@@ -313,17 +333,17 @@ def _draw_frame_and_footer(c, W, H, accent_rgb, brand_label):
         for corner_y in (inset + 12, H - inset - 12):
             _draw_sparkle(c, corner_x, corner_y, accent_rgb)
 
-    _draw_footer(c, W, accent_rgb, brand_label)
+    _draw_footer(c, W, accent_rgb, brand_label, contact_email, contact_phone)
 
 
-def _draw_page_chrome(c, W, H, bg_rgb, accent_rgb, brand_label):
+def _draw_page_chrome(c, W, H, bg_rgb, accent_rgb, brand_label, contact_email=None, contact_phone=None):
     """Pastel background + the frame/sparkles/footer above - drawn first,
     under everything else, on every page including the cover (the cover
     additionally gets a scattered photo collage on top - see
     `_draw_polaroid` / build_pdf)."""
     c.setFillColorRGB(*bg_rgb)
     c.rect(0, 0, W, H, fill=1, stroke=0)
-    _draw_frame_and_footer(c, W, H, accent_rgb, brand_label)
+    _draw_frame_and_footer(c, W, H, accent_rgb, brand_label, contact_email, contact_phone)
 
 
 # --------------------------------------------------------- print quality
@@ -497,7 +517,10 @@ def build_pdf(job_dir: str, language: str = None) -> bytes:
     sample_text = " ".join(text_for(p) for p in pages) + " " + story.get("title", "")
     script = "" if is_english else detect_script(sample_text)
     regular_font, bold_font, supports_script = resolve_fonts(script)
-    site_name = db.get_site_settings()["site_name"]
+    site_settings = db.get_site_settings()
+    site_name = site_settings["site_name"]
+    contact_email = site_settings["contact_email"]
+    contact_phone = site_settings["contact_phone"]
 
     buf = io.BytesIO()
     c = canvas.Canvas(buf, pagesize=letter)
@@ -511,7 +534,7 @@ def build_pdf(job_dir: str, language: str = None) -> bytes:
     # pile" collage of up to 3 RANDOMLY chosen illustrations from the
     # story's (up to 5) generated pages, sized as large as the remaining
     # space allows - overlapping each other, but never the banner.
-    _draw_page_chrome(c, W, H, cover_bg, cover_accent, site_name)
+    _draw_page_chrome(c, W, H, cover_bg, cover_accent, site_name, contact_email, contact_phone)
 
     # --- 1. compute the banner's geometry first (no drawing yet) - the
     # collage layout below needs to know exactly where the banner ends.
@@ -620,7 +643,7 @@ def build_pdf(job_dir: str, language: str = None) -> bytes:
     total_pages = len(pages)
     for i, page in enumerate(pages):
         bg_rgb, accent_rgb = _PALETTE[i % len(_PALETTE)]
-        _draw_page_chrome(c, W, H, bg_rgb, accent_rgb, site_name)
+        _draw_page_chrome(c, W, H, bg_rgb, accent_rgb, site_name, contact_email, contact_phone)
         _draw_title_eyebrow(c, W, H, title, bold_font, accent_rgb)
 
         margin = 65
@@ -655,7 +678,7 @@ def build_pdf(job_dir: str, language: str = None) -> bytes:
 
     # -------------------------------------------------------- closing page
     end_bg, end_accent = _PALETTE[(len(pages)) % len(_PALETTE)]
-    _draw_page_chrome(c, W, H, end_bg, end_accent, site_name)
+    _draw_page_chrome(c, W, H, end_bg, end_accent, site_name, contact_email, contact_phone)
     _draw_title_eyebrow(c, W, H, title, bold_font, end_accent)
     c.setFont(bold_font, 40)
     c.setFillColorRGB(*end_accent)
