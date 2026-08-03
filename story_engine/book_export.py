@@ -14,6 +14,7 @@ import random
 
 from PIL import Image
 
+from . import db
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 from reportlab.lib.utils import ImageReader
@@ -175,7 +176,6 @@ def resolve_fonts(script: str):
 # which might be Hindi, Tamil, etc. - uses the resolved Unicode font.
 
 BRAND_URL = "https://www.kertoons.com"
-BRAND_LABEL = "www.kertoons.com"
 
 # (page background, accent/border color) - cycled per page for a playful,
 # varied feel across the book; RGB values are 0-1 floats for reportlab.
@@ -230,13 +230,16 @@ def _draw_sparkle(c, x, y, rgb, size=5.5):
     c.restoreState()
 
 
-def _draw_footer(c, W, accent_rgb):
+def _draw_footer(c, W, accent_rgb, brand_label):
     """Brand line on every page, centered at the bottom, drawn AND wired up
     as a real clickable PDF hyperlink to kertoons.com. Sits on a small
     opaque white pill so it stays legible regardless of what's behind it -
-    a flat pastel page, or a busy full-bleed cover illustration."""
+    a flat pastel page, or a busy full-bleed cover illustration.
+    `brand_label` is the admin's configured site name (see build_pdf) - the
+    hyperlink target itself (BRAND_URL) is a fixed technical URL, unrelated
+    to that display name."""
     font, size = "Helvetica-Oblique", 9.5
-    text_w = c.stringWidth(BRAND_LABEL, font, size)
+    text_w = c.stringWidth(brand_label, font, size)
     text_x, text_y = W / 2, 24
 
     pad_x, pad_y = 10, 5
@@ -247,7 +250,7 @@ def _draw_footer(c, W, accent_rgb):
 
     c.setFont(font, size)
     c.setFillColorRGB(*accent_rgb)
-    c.drawCentredString(text_x, text_y, BRAND_LABEL)
+    c.drawCentredString(text_x, text_y, brand_label)
     c.setStrokeColorRGB(*accent_rgb)
     c.setLineWidth(0.6)
     c.line(text_x - text_w / 2, text_y - 2, text_x + text_w / 2, text_y - 2)
@@ -296,7 +299,7 @@ def _draw_page_badge(c, W, accent_rgb, label):
     c.drawCentredString(cx, cy - 3.5, label)
 
 
-def _draw_frame_and_footer(c, W, H, accent_rgb):
+def _draw_frame_and_footer(c, W, H, accent_rgb, brand_label):
     """Decorative rounded border frame + corner sparkles + the branded
     footer link - everything EXCEPT the background fill, so this can be
     layered on top of either a flat pastel color or a full-bleed cover
@@ -310,17 +313,17 @@ def _draw_frame_and_footer(c, W, H, accent_rgb):
         for corner_y in (inset + 12, H - inset - 12):
             _draw_sparkle(c, corner_x, corner_y, accent_rgb)
 
-    _draw_footer(c, W, accent_rgb)
+    _draw_footer(c, W, accent_rgb, brand_label)
 
 
-def _draw_page_chrome(c, W, H, bg_rgb, accent_rgb):
+def _draw_page_chrome(c, W, H, bg_rgb, accent_rgb, brand_label):
     """Pastel background + the frame/sparkles/footer above - drawn first,
     under everything else, on every page including the cover (the cover
     additionally gets a scattered photo collage on top - see
     `_draw_polaroid` / build_pdf)."""
     c.setFillColorRGB(*bg_rgb)
     c.rect(0, 0, W, H, fill=1, stroke=0)
-    _draw_frame_and_footer(c, W, H, accent_rgb)
+    _draw_frame_and_footer(c, W, H, accent_rgb, brand_label)
 
 
 # --------------------------------------------------------- print quality
@@ -494,6 +497,7 @@ def build_pdf(job_dir: str, language: str = None) -> bytes:
     sample_text = " ".join(text_for(p) for p in pages) + " " + story.get("title", "")
     script = "" if is_english else detect_script(sample_text)
     regular_font, bold_font, supports_script = resolve_fonts(script)
+    site_name = db.get_site_settings()["site_name"]
 
     buf = io.BytesIO()
     c = canvas.Canvas(buf, pagesize=letter)
@@ -507,16 +511,16 @@ def build_pdf(job_dir: str, language: str = None) -> bytes:
     # pile" collage of up to 3 RANDOMLY chosen illustrations from the
     # story's (up to 5) generated pages, sized as large as the remaining
     # space allows - overlapping each other, but never the banner.
-    _draw_page_chrome(c, W, H, cover_bg, cover_accent)
+    _draw_page_chrome(c, W, H, cover_bg, cover_accent, site_name)
 
     # --- 1. compute the banner's geometry first (no drawing yet) - the
     # collage layout below needs to know exactly where the banner ends.
-    title = story.get("title", "Kertoons Story")
+    title = story.get("title") or f"{site_name} Story"
     title_size = 34
     title_lines = _wrap_lines(c, title, bold_font, title_size, W - 200)
     title_line_h = title_size * 1.15
 
-    subtitle = "A KERTOONS STORYBOOK"
+    subtitle = f"A {site_name.upper()} STORYBOOK"
     subtitle_size = 11
     region_line = f"Set in {story.get('region', '')}"
     if not is_english:
@@ -616,7 +620,7 @@ def build_pdf(job_dir: str, language: str = None) -> bytes:
     total_pages = len(pages)
     for i, page in enumerate(pages):
         bg_rgb, accent_rgb = _PALETTE[i % len(_PALETTE)]
-        _draw_page_chrome(c, W, H, bg_rgb, accent_rgb)
+        _draw_page_chrome(c, W, H, bg_rgb, accent_rgb, site_name)
         _draw_title_eyebrow(c, W, H, title, bold_font, accent_rgb)
 
         margin = 65
@@ -651,7 +655,7 @@ def build_pdf(job_dir: str, language: str = None) -> bytes:
 
     # -------------------------------------------------------- closing page
     end_bg, end_accent = _PALETTE[(len(pages)) % len(_PALETTE)]
-    _draw_page_chrome(c, W, H, end_bg, end_accent)
+    _draw_page_chrome(c, W, H, end_bg, end_accent, site_name)
     _draw_title_eyebrow(c, W, H, title, bold_font, end_accent)
     c.setFont(bold_font, 40)
     c.setFillColorRGB(*end_accent)
@@ -663,7 +667,7 @@ def build_pdf(job_dir: str, language: str = None) -> bytes:
         _draw_quote_card(c, W, H / 2, f'"{story["moral"]}"', regular_font, end_accent, size=14)
     c.setFont("Helvetica", 11)
     c.setFillColorRGB(0.35, 0.3, 0.25)
-    c.drawCentredString(W / 2, H / 2 - 110, "Thanks for reading a Kertoons story!")
+    c.drawCentredString(W / 2, H / 2 - 110, f"Thanks for reading a {site_name} story!")
     c.showPage()
 
     c.save()

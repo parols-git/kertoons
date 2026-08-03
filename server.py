@@ -237,7 +237,11 @@ class Handler(BaseHTTPRequestHandler):
                     return
                 owner = db.get_user_by_id(db.get_story_owner_id(job_id))
                 author = owner["username"] if owner else "unknown"
-                self._send_html(share_page.render_share_page(job_id, story, author))
+                site_settings = db.get_site_settings()
+                self._send_html(share_page.render_share_page(
+                    job_id, story, author,
+                    site_name=site_settings["site_name"], footer_text=site_settings["footer_text"],
+                ))
                 return
 
             if path.startswith("/static/"):
@@ -245,6 +249,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
 
             if path == "/api/config":
+                site_settings = db.get_site_settings()
                 self._send_json({
                     "mock_story": bool(config.MOCK_STORY),
                     "mock_translation": bool(config.MOCK_TRANSLATION),
@@ -253,6 +258,8 @@ class Handler(BaseHTTPRequestHandler):
                     "page_count": config.PAGE_COUNT,
                     "credit_pack_credits": payments.CREDIT_PACK_CREDITS,
                     "credit_pack_price_usd": payments.CREDIT_PACK_PRICE_USD_CENTS / 100,
+                    "site_name": site_settings["site_name"],
+                    "footer_text": site_settings["footer_text"],
                 })
                 return
 
@@ -924,6 +931,19 @@ class Handler(BaseHTTPRequestHandler):
                     self._send_error_json("unknown coupon code", 404)
                     return
                 self._send_json({"ok": True, "code": code, "active": active})
+                return
+
+            if path == "/api/admin/settings":
+                if not self._require_admin():
+                    return
+                body = self._read_json_body()
+                site_name = (body.get("site_name") or "").strip()
+                footer_text = (body.get("footer_text") or "").strip()
+                if not site_name:
+                    self._send_error_json("site name is required", 400)
+                    return
+                settings = db.set_site_settings(site_name, footer_text)
+                self._send_json({"ok": True, "settings": settings})
                 return
 
             self.send_response(404)

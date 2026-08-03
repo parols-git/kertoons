@@ -304,6 +304,22 @@ async function toggleCoupon(code, active) {
   }
 }
 
+// -------------------------------------------------------------- settings
+
+async function loadSettings() {
+  try {
+    // /api/config already carries site_name/footer_text (public - every
+    // page reads it to brand itself), so no separate admin-only GET is
+    // needed just to prefill this form.
+    const res = await fetch("api/config");
+    const data = await res.json();
+    document.getElementById("settings-site-name").value = data.site_name || "";
+    document.getElementById("settings-footer-text").value = data.footer_text || "";
+  } catch (e) {
+    console.error(e);
+  }
+}
+
 // -------------------------------------------------------------- reports
 
 async function loadReports() {
@@ -385,6 +401,24 @@ document.getElementById("create-coupon-form").addEventListener("submit", async (
   }
 });
 
+document.getElementById("settings-form").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const site_name = document.getElementById("settings-site-name").value.trim();
+  const footer_text = document.getElementById("settings-footer-text").value.trim();
+  try {
+    const res = await fetch("api/admin/settings", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ site_name, footer_text }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Failed to save settings");
+    _adminShowBanner("Settings saved - reload any open page to see the new branding.", "success");
+    await renderNav(); // picks up the new name/footer on this page immediately too
+  } catch (e) {
+    alert(e.message);
+  }
+});
+
 (async () => {
   const user = await renderNav();
   if (!user || user.role !== "admin") {
@@ -393,6 +427,7 @@ document.getElementById("create-coupon-form").addEventListener("submit", async (
   }
   currentAdminId = user.id;
   document.getElementById("admin-panel").style.display = "block";
+  loadSettings();
   loadUsers();
   loadStories();
   loadCoupons();

@@ -27,14 +27,14 @@ _PAGE_TEMPLATE = """<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>__TITLE__ - Kertoons</title>
+<title>__TITLE__ - __SITE_NAME__</title>
 
 <meta property="og:type" content="website">
 <meta property="og:title" content="__TITLE__">
 <meta property="og:description" content="__DESCRIPTION__">
 <meta property="og:image" content="__IMAGE_URL__">
 <meta property="og:url" content="__SHARE_URL__">
-<meta property="og:site_name" content="Kertoons">
+<meta property="og:site_name" content="__SITE_NAME__">
 
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="__TITLE__">
@@ -45,7 +45,7 @@ _PAGE_TEMPLATE = """<!DOCTYPE html>
 </head>
 <body>
 <header>
-  <h1>🧸 Kertoons</h1>
+  <h1>🧸 __SITE_NAME__</h1>
   <nav id="nav-bar" class="nav-bar"></nav>
 </header>
 
@@ -67,7 +67,7 @@ __PAGES_HTML__
 
 <footer class="site-footer">
   <p><a href="faq.html">FAQ</a> · <a href="help.html">Help</a> ·
-  <a href="https://kertoons.com" target="_blank" rel="noopener">kertoons.com</a> - Another Elisda AI project</p>
+  <span id="site-footer-text">__FOOTER_TEXT__</span></p>
 </footer>
 </body>
 </html>
@@ -96,18 +96,22 @@ def _build_pages_html(job_id: str, pages: list) -> str:
     return "\n".join(cards)
 
 
-def render_share_page(job_id: str, story: dict, author: str) -> str:
+def render_share_page(job_id: str, story: dict, author: str,
+                       site_name: str = "Kertoons",
+                       footer_text: str = "kertoons.com - Another Elisda AI project") -> str:
     """Returns the complete HTML document for a story's public share page.
     Caller (server.py) is responsible for the visibility check (owner or
     published) before calling this - this function itself has no opinion on
-    who's allowed to see it."""
-    title = story.get("title") or "A Kertoons Story"
+    who's allowed to see it. `site_name`/`footer_text` come from the admin
+    panel's site settings (see story_engine/db.py's get_site_settings) -
+    defaults here only matter if a caller doesn't pass them."""
+    title = story.get("title") or f"A {site_name} Story"
     region = story.get("region") or ""
     moral = story.get("moral") or ""
     pages = story.get("pages") or []
     first_page_text = pages[0].get("text", "") if pages else ""
 
-    description = moral or first_page_text or "A warm, region-based cartoon story, made with Kertoons."
+    description = moral or first_page_text or f"A warm, region-based cartoon story, made with {site_name}."
     if len(description) > 200:
         description = description[:197].rstrip() + "..."
 
@@ -125,6 +129,8 @@ def render_share_page(job_id: str, story: dict, author: str) -> str:
         "__AUTHOR__": html.escape(author),
         "__MORAL_HTML__": moral_html,
         "__PAGES_HTML__": _build_pages_html(job_id, pages),
+        "__SITE_NAME__": html.escape(site_name),
+        "__FOOTER_TEXT__": html.escape(footer_text),
     }
 
     page = _PAGE_TEMPLATE

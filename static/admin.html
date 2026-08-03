@@ -21,6 +21,16 @@
 
   <section id="admin-panel" style="display:none;">
     <section class="card">
+      <h2>Settings</h2>
+      <p class="hint">Site name and footer text shown on every page.</p>
+      <form id="settings-form" class="admin-inline-form">
+        <input type="text" id="settings-site-name" placeholder="Site name" required>
+        <input type="text" id="settings-footer-text" placeholder="Footer text" style="flex:1; min-width:220px;">
+        <button type="submit" class="btn-secondary">Save settings</button>
+      </form>
+    </section>
+
+    <section class="card">
       <div class="usage-header">
         <h2>Users</h2>
       </div>
@@ -62,7 +72,7 @@
 
 <footer class="site-footer">
   <p><a href="faq.html">FAQ</a> · <a href="help.html">Help</a> ·
-  <a href="https://kertoons.com" target="_blank" rel="noopener">kertoons.com</a> - Another Elisda AI project</p>
+  <span id="site-footer-text">kertoons.com - Another Elisda AI project</span></p>
 </footer>
 </body>
 </html>

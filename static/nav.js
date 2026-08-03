@@ -11,6 +11,42 @@ function _navEscapeHtml(str) {
     .replace(/"/g, "&quot;");
 }
 
+// Replaces every occurrence of the literal word "Kertoons" - in the page
+// <title> and in every body text node (the header's "🧸 Kertoons", FAQ/Help
+// marketing copy, button labels, etc.) - with the admin's configured site
+// name (see the admin panel's Settings section / db.get_site_settings()).
+// A generic text-node walk rather than editing each page individually, so
+// every current AND future mention of the brand name stays in sync from
+// one place. No-ops entirely when the name is still the default, so the
+// common case costs nothing.
+function _applyBranding(siteName) {
+  if (!siteName || siteName === "Kertoons") return;
+  if (document.title.includes("Kertoons")) {
+    document.title = document.title.replace(/Kertoons/g, siteName);
+  }
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
+    acceptNode(node) {
+      const tag = node.parentElement && node.parentElement.tagName;
+      if (tag === "SCRIPT" || tag === "STYLE") return NodeFilter.FILTER_REJECT;
+      return node.nodeValue.includes("Kertoons") ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP;
+    },
+  });
+  const textNodes = [];
+  let node;
+  while ((node = walker.nextNode())) textNodes.push(node);
+  textNodes.forEach((n) => {
+    n.nodeValue = n.nodeValue.replace(/Kertoons/g, siteName);
+  });
+}
+
+// The trailing footer message (default "kertoons.com - Another Elisda AI
+// project") is a fully separate, admin-editable string, not just a name
+// substitution - every page's footer has a #site-footer-text span for it.
+function _applyFooterText(footerText) {
+  const el = document.getElementById("site-footer-text");
+  if (el && footerText) el.textContent = footerText;
+}
+
 async function renderNav() {
   let user = null;
   let cfg = {};
@@ -21,6 +57,9 @@ async function renderNav() {
   } catch (e) {
     console.error(e);
   }
+
+  _applyBranding(cfg.site_name);
+  _applyFooterText(cfg.footer_text);
 
   const nav = document.getElementById("nav-bar");
   if (!nav) return user;

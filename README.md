@@ -112,6 +112,20 @@ trust a client-reported role). From there an admin can:
 - View a purchases + coupon-redemption summary report
   (`GET /api/admin/reports/summary`): total purchases/revenue/credits sold,
   and a per-coupon redemption count.
+- Rebrand the whole app under **Settings**: site name and footer text
+  (`db.get_site_settings`/`set_site_settings`, `POST /api/admin/settings`).
+  These are served publicly on `GET /api/config` since every page needs
+  them. The site name isn't just a template variable in a couple of spots -
+  `static/nav.js`'s `_applyBranding()` walks every text node on the page
+  (plus `document.title`) replacing the literal word "Kertoons" wherever it
+  appears, so FAQ/Help marketing copy, page titles, and the header all stay
+  in sync automatically without hardcoding the name in more than one place.
+  The footer's trailing message is a separate free-text field
+  (`#site-footer-text` on every page). Both are also applied server-side
+  where no browser JS runs: the crawler-facing share page
+  (`story_engine/share_page.py`) and exported PDFs
+  (`story_engine/book_export.py` - cover subtitle, closing line, and the
+  branded footer link on every page).
 
 ## The Storytelling Expert skill (used for every story)
 

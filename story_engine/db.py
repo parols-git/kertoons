@@ -32,6 +32,9 @@ _LOCK = threading.Lock()
 # feature existed also fall back to this value rather than reading as 0.
 DEFAULT_IMAGE_CREDITS = 50
 
+DEFAULT_SITE_NAME = "Kertoons"
+DEFAULT_FOOTER_TEXT = "kertoons.com - Another Elisda AI project"
+
 _SKELETON = {
     "next_user_id": 1,
     "users": [],
@@ -41,6 +44,7 @@ _SKELETON = {
     "processed_payments": [],
     "coupons": [],
     "coupon_redemptions": [],
+    "site_settings": {"site_name": DEFAULT_SITE_NAME, "footer_text": DEFAULT_FOOTER_TEXT},
 }
 
 
@@ -540,3 +544,26 @@ def list_coupon_redemptions() -> list:
     with _LOCK:
         data = _load()
     return list(data.get("coupon_redemptions", []))
+
+
+# ---------------------------------------------------------- site settings
+
+def get_site_settings() -> dict:
+    """Admin-configurable branding - site display name and the trailing
+    footer message shown on every page. Falls back to the defaults for
+    data files saved before this feature existed."""
+    with _LOCK:
+        data = _load()
+    settings = data.get("site_settings") or {}
+    return {
+        "site_name": settings.get("site_name") or DEFAULT_SITE_NAME,
+        "footer_text": settings.get("footer_text") or DEFAULT_FOOTER_TEXT,
+    }
+
+
+def set_site_settings(site_name: str, footer_text: str) -> dict:
+    with _LOCK:
+        data = _load()
+        data["site_settings"] = {"site_name": site_name, "footer_text": footer_text}
+        _save(data)
+        return dict(data["site_settings"])
