@@ -52,7 +52,7 @@ import hashlib
 import requests
 from PIL import Image, ImageDraw, ImageFont
 
-from . import config
+from . import config, db
 
 
 class ImageGenerationError(Exception):
@@ -111,9 +111,6 @@ def _request_with_retry(method, url, parse_fn, max_retries=MAX_RETRIES, **kwargs
 
     raise ImageGenerationError(f"Image API request failed after {max_retries} attempts: {last_error}")
 
-WATERMARK_TEXT = "www.kertoons.com"
-
-
 def _watermark_font(size: int):
     for name in ("DejaVuSans-Bold.ttf", "Arial Bold.ttf", "Arial.ttf"):
         try:
@@ -126,11 +123,14 @@ def _watermark_font(size: int):
         return ImageFont.load_default()
 
 
-def _add_watermark(image_bytes: bytes, text: str = WATERMARK_TEXT) -> bytes:
+def _add_watermark(image_bytes: bytes, text: str) -> bytes:
     """Stamp every generated image (mock or real, any provider) with a
     centered, semi-transparent watermark before it's ever written to disk -
     applied once, here, at the single choke point every image passes
-    through, so no code path can accidentally skip it."""
+    through, so no code path can accidentally skip it. `text` is the
+    admin's configured site name (see generate_scene_image) - baked into
+    the pixels at generation time, so renaming the site later only affects
+    newly generated images, not ones already on disk."""
     base = Image.open(io.BytesIO(image_bytes)).convert("RGBA")
     overlay = Image.new("RGBA", base.size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
@@ -197,8 +197,10 @@ def generate_scene_image(character_block: str, scene_text: str, region: str = ""
       pipeline.py's character-debut-tracking bookkeeping, but intentionally
       UNUSED here - see above.
     """
+    watermark_text = db.get_site_settings()["site_name"]
+
     if config.MOCK_IMAGES:
-        return _add_watermark(_mock_scene_image(character_block, scene_text, characters or [], size))
+        return _add_watermark(_mock_scene_image(character_block, scene_text, characters or [], size), watermark_text)
 
     prompt = (
         f"3D cartoon, {character_block}. Setting: {region}. Scene: {scene_text}. "
@@ -218,7 +220,7 @@ def generate_scene_image(character_block: str, scene_text: str, region: str = ""
     last_error = None
     for attempt in range(MAX_PROMPT_ADJUST_ATTEMPTS):
         try:
-            return _add_watermark(_deepai_image(prompt))
+            return _add_watermark(_deepai_image(prompt), watermark_text)
         except UnsafeContentError as e:
             print(f"[kertoons] image prompt flagged unsafe (attempt {attempt + 1}/"
                   f"{MAX_PROMPT_ADJUST_ATTEMPTS}), retrying with an adjusted prompt: {e}")

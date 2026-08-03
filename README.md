@@ -386,9 +386,13 @@ reference for real mode) directly addresses that.
 - `/api/story/image` serves each of the 5 generated PNGs
 - `/api/story/download?format=zip` and `format=pdf` both produce valid files
 - Safety/structure: exactly 5 pages, characters list present, moral present
-- Every generated image carries a centered `www.kertoons.com` watermark at
-  15% opacity (mock and real code paths both pass through the same
-  `_add_watermark()` choke point in `image_client.py`)
+- Every generated image carries a centered watermark at 15% opacity, using
+  the admin's currently-configured site name (mock and real code paths both
+  pass through the same `_add_watermark()` choke point in
+  `image_client.py`, called from `generate_scene_image()` with
+  `db.get_site_settings()["site_name"]`). Baked into the pixels at
+  generation time, so renaming the site only affects newly generated
+  images going forward, not ones already on disk.
 - LLM/image API calls retry with backoff on connection failure, timeout, or
   a malformed/truncated response, and fail fast (no retry) on a clean 4xx
   like a bad API key - verified with simulated flaky/failing/truncated
