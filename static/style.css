@@ -102,6 +102,30 @@ main.narrow { max-width: 420px; }
 .auth-card .btn-primary { margin-top: 20px; }
 .auth-card > .hint:last-child { text-align: center; margin-top: 16px; }
 
+.captcha-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.captcha-row img {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+  flex-shrink: 0;
+}
+.captcha-row #captcha-refresh {
+  padding: 6px 10px;
+  font-size: 0.9rem;
+  flex-shrink: 0;
+}
+.captcha-row input {
+  flex: 1;
+  min-width: 0;
+  letter-spacing: 0.15em;
+  text-align: center;
+}
+
 .card {
   background: var(--card);
   border: 1px solid var(--border);

@@ -39,6 +39,19 @@ one story by `?job_id=`). `static/book.js` holds the page-card/language-switch/
 regenerate/publish rendering shared by `create.html` and `story.html`;
 `static/nav.js` renders the top nav (shared by every page).
 
+**The login form (only - not registration) requires a 4-digit numeric
+captcha**, a Pillow-rendered image with light noise-line obfuscation
+(`server.py`'s `_generate_captcha_image`/`_issue_captcha`/`_consume_captcha`,
+no external captcha service or new dependency). `GET /api/captcha` issues a
+`captcha_id` and stores its code in memory (`CAPTCHAS`, never persisted -
+meaningless after the page closes) for 5 minutes; `GET /api/captcha/image`
+renders it. `POST /api/login` checks and **consumes** the captcha (single-
+use - removed on any attempt, right or wrong) *before* even looking up the
+username, so a scripted brute-force attempt can't rack up password guesses
+without solving a fresh captcha every single time. The 🔄 button next to the
+image, and the always-load-a-new-one-after-any-attempt behavior in
+`static/auth.js`, mean a failed login never leaves a dead code on screen.
+
 ## Editing a page's image prompt before regenerating
 
 Each page's illustration prompt is shown in an editable textarea between the

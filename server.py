@@ -27,7 +27,10 @@ import re
 import csv
 import io
 import json
+import time
 import base64
+import random
+import secrets
 import mimetypes
 import shutil
 import threading
@@ -37,6 +40,8 @@ import http.cookies
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
+from PIL import Image, ImageDraw, ImageFont
+
 from story_engine import config, db, auth, payments, share_page
 from story_engine.pipeline import run_job, regenerate_page_image
 from story_engine.book_export import build_zip, build_pdf
@@ -44,6 +49,13 @@ from story_engine.image_client import ImageGenerationError
 
 JOBS = {}
 JOBS_LOCK = threading.Lock()
+
+# In-memory only (never persisted) - a login captcha is short-lived and
+# meaningless after the page is closed or the code is used, so there's
+# nothing worth surviving a server restart for.
+CAPTCHAS = {}
+CAPTCHAS_LOCK = threading.Lock()
+CAPTCHA_TTL_SECONDS = 300  # 5 minutes - long enough to read and type, short enough that abandoned page loads don't grow this dict forever
 
 _JOB_ID_RE = re.compile(r"[0-9a-f]{6,40}")
 _USERNAME_RE = re.compile(r"[A-Za-z0-9_.-]{3,30}")
@@ -70,6 +82,99 @@ MAX_CUSTOM_PROMPT_LEN = 2000
 
 def new_job_id():
     return uuid.uuid4().hex[:12]
+
+
+# --------------------------------------------------------------- captcha
+#
+# A simple 4-digit numeric captcha on the login form, meant to slow down
+# scripted brute-force login attempts, not to defeat a determined attacker
+# with OCR - deliberately simple (stdlib/Pillow only, no external captcha
+# service or new dependency) to match this app's zero-paid-services ethos.
+
+def _issue_captcha():
+    """Generates a new 4-digit login captcha. Returns (captcha_id, code).
+    Opportunistically prunes expired entries on every call, so CAPTCHAS
+    never grows unbounded just from visitors who load the login page and
+    leave without submitting."""
+    now = time.time()
+    code = f"{random.randint(0, 9999):04d}"
+    captcha_id = secrets.token_hex(12)
+    with CAPTCHAS_LOCK:
+        for expired_id in [cid for cid, (_, exp) in CAPTCHAS.items() if exp < now]:
+            CAPTCHAS.pop(expired_id, None)
+        CAPTCHAS[captcha_id] = (code, now + CAPTCHA_TTL_SECONDS)
+    return captcha_id, code
+
+
+def _peek_captcha_code(captcha_id: str):
+    """The code for captcha_id, WITHOUT consuming it - used only by the
+    image endpoint, which may legitimately be requested more than once for
+    the same captcha_id (e.g. a slow image load retried by the browser).
+    Returns None if captcha_id is unknown or has expired."""
+    with CAPTCHAS_LOCK:
+        entry = CAPTCHAS.get(captcha_id)
+        if not entry:
+            return None
+        code, expires = entry
+        if expires < time.time():
+            CAPTCHAS.pop(captcha_id, None)
+            return None
+        return code
+
+
+def _consume_captcha(captcha_id: str, answer: str) -> bool:
+    """Checks answer against captcha_id's code - single-use: the entry is
+    removed on ANY attempt, correct or not, so neither a captured answer
+    nor a guessed one can ever be replayed, and a wrong attempt always
+    forces a fresh captcha rather than allowing repeated guesses against
+    the same one."""
+    with CAPTCHAS_LOCK:
+        entry = CAPTCHAS.pop(captcha_id, None)
+    if not entry:
+        return False
+    code, expires = entry
+    if expires < time.time():
+        return False
+    return (answer or "").strip() == code
+
+
+def _generate_captcha_image(code: str) -> bytes:
+    """Renders `code` (4 digits) as a small PNG with randomized per-digit
+    vertical jitter and background noise lines/dots - basic obfuscation
+    against trivial automated OCR, not a rigorous anti-bot measure."""
+    W, H = 140, 50
+    img = Image.new("RGB", (W, H), (255, 255, 255))
+    draw = ImageDraw.Draw(img)
+    rng = random.Random()  # fresh randomness per render, independent of `code`
+
+    for _ in range(6):
+        p1 = (rng.randint(0, W), rng.randint(0, H))
+        p2 = (rng.randint(0, W), rng.randint(0, H))
+        shade = rng.randint(170, 215)
+        draw.line([p1, p2], fill=(shade, shade, shade), width=1)
+
+    try:
+        font = ImageFont.truetype("DejaVuSans-Bold.ttf", 28)
+    except Exception:
+        try:
+            font = ImageFont.load_default(size=28)  # Pillow >= 9.2
+        except TypeError:
+            font = ImageFont.load_default()
+
+    x = 18
+    for ch in code:
+        y = rng.randint(4, 14)
+        draw.text((x, y), ch, font=font, fill=(35, 30, 70))
+        x += 27
+
+    for _ in range(90):
+        px, py = rng.randint(0, W - 1), rng.randint(0, H - 1)
+        shade = rng.randint(160, 210)
+        draw.point((px, py), fill=(shade, shade, shade))
+
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -272,6 +377,21 @@ class Handler(BaseHTTPRequestHandler):
 
             if path == "/api/me":
                 self._send_json({"user": self._current_user()})
+                return
+
+            if path == "/api/captcha":
+                captcha_id, _code = _issue_captcha()
+                self._send_json({"captcha_id": captcha_id})
+                return
+
+            if path == "/api/captcha/image":
+                captcha_id = qs.get("captcha_id", [None])[0]
+                code = _peek_captcha_code(captcha_id) if captcha_id else None
+                if not code:
+                    self.send_response(404)
+                    self.end_headers()
+                    return
+                self._send_bytes(_generate_captcha_image(code), "image/png")
                 return
 
             if path == "/api/stories/gallery":
@@ -505,6 +625,17 @@ class Handler(BaseHTTPRequestHandler):
                 body = self._read_json_body()
                 username = (body.get("username") or "").strip()
                 password = body.get("password") or ""
+                captcha_id = (body.get("captcha_id") or "").strip()
+                captcha_answer = body.get("captcha_answer") or ""
+
+                # Checked (and consumed - see _consume_captcha) BEFORE ever
+                # touching the credential store, so a scripted brute-force
+                # attempt can't rack up password guesses without also
+                # solving a fresh captcha for every single one.
+                if not captcha_id or not _consume_captcha(captcha_id, captcha_answer):
+                    self._send_error_json("incorrect or expired captcha - please try again", 400)
+                    return
+
                 record = db.get_user_by_username(username)
                 if not record or not auth.verify_password(password, record["password_salt"], record["password_hash"]):
                     self._send_error_json("invalid username or password", 401)
