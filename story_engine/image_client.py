@@ -181,14 +181,63 @@ def _soften_prompt(character_block: str, scene_text: str, region: str, level: in
     )
 
 
+def build_prompt(character_block: str, scene_text: str, region: str,
+                  page_number: int = None, total_pages: int = None) -> str:
+    """The full, default image-generation prompt - character-consistency
+    boilerplate + this page's own scene text. Pulled out as its own
+    function (rather than inlined in generate_scene_image) so callers can
+    know in advance exactly what will be sent, e.g. to store as
+    page["image_prompt"] even before/without a real API call.
+
+    When `page_number`/`total_pages` are given, a short "this is page N of
+    TOTAL" clause is appended - not just more instruction-following filler,
+    but a concrete guarantee that two pages of the same story can never
+    produce the byte-identical prompt string even if the story model ever
+    writes near-duplicate scene text for two pages, since the page markers
+    always differ. A text-to-image API given the exact same prompt twice
+    tends to return the exact same (or near-identical) image, so this is
+    the cheapest reliable lever this app has over "every page's image must
+    actually look different" beyond just asking nicely in the wording."""
+    uniqueness_clause = ""
+    if page_number and total_pages:
+        uniqueness_clause = (
+            f" This is page {page_number} of {total_pages} - it must be immediately, "
+            f"visually distinguishable from every other page in this book, not merely similar."
+        )
+    return (
+        f"PIXAR 3D cartoon style, {character_block}. Setting: {region}. Scene: {scene_text}."
+        f"{uniqueness_clause} "
+        f"This illustration must look STRIKINGLY, OBVIOUSLY different from every other page in "
+        f"this book at a glance - a different pose and action for each character, a different "
+        f"camera framing/shot type, a different specific spot, different background scenery, "
+        f"and different lighting, all matching the scene description above. Never a generic or "
+        f"repeated composition. "
+        f"Each character's appearance must exactly match their fixed description above - "
+        f"identical faces, eye color, hairstyle, hair color, skin/fur tone, and outfit colors "
+        f"every time. Do NOT add any accessories, glasses, hats, goggles, bows, or props onto a "
+        f"character's body that aren't part of their fixed appearance above, even if similar "
+        f"objects appear elsewhere in the scene. "
+        f"Kid-safe soft pastel colors."
+    )
+
+
 def generate_scene_image(character_block: str, scene_text: str, region: str = "",
                           characters: list = None, reference_image_bytes: bytes = None,
-                          size=(1024, 1024), custom_prompt: str = None) -> bytes:
+                          size=(1024, 1024), custom_prompt: str = None,
+                          page_number: int = None, total_pages: int = None):
     """Generate one page's illustration, from text alone - see the
     CHARACTER CONSISTENCY STRATEGY note at the top of this file for why
     reference-image conditioning (DeepAI's Image Editor endpoint) was tried
     and then removed: it produced near-identical pages regardless of the
     prompt.
+
+    Returns `(image_bytes, prompt_used)` - `prompt_used` is the EXACT text
+    that produced this image (the caller's own `custom_prompt` verbatim if
+    one was given, otherwise the composed prompt from `build_prompt()`, or
+    whichever automatically-softened rewrite actually succeeded after an
+    unsafe-content rejection) - callers persist this as the page's
+    `image_prompt` so what's shown/edited in the UI is always accurate to
+    what's actually on disk, never a separately-guessed approximation.
 
     - `character_block`: the ONE locked, code-built character description
       string, identical on every call for this story (see prompts.py).
@@ -208,34 +257,29 @@ def generate_scene_image(character_block: str, scene_text: str, region: str = ""
       rejects a custom prompt, that's surfaced directly so the user can
       edit and retry themselves, rather than silently substituting
       different wording they didn't write.
+    - `page_number`/`total_pages`: forwarded to `build_prompt()` for its
+      per-page uniqueness clause; ignored when `custom_prompt` is given
+      (the user's exact text is never modified).
     """
     watermark_text = db.get_site_settings()["site_name"]
 
     if config.MOCK_IMAGES:
-        return _add_watermark(_mock_scene_image(character_block, scene_text, characters or [], size), watermark_text)
+        prompt_used = (custom_prompt or "").strip() or build_prompt(
+            character_block, scene_text, region, page_number, total_pages)
+        image_bytes = _add_watermark(
+            _mock_scene_image(character_block, scene_text, characters or [], size), watermark_text)
+        return image_bytes, prompt_used
 
     if custom_prompt and custom_prompt.strip():
-        return _add_watermark(_deepai_image(custom_prompt.strip()), watermark_text)
+        prompt_used = custom_prompt.strip()
+        return _add_watermark(_deepai_image(prompt_used), watermark_text), prompt_used
 
-    prompt = (
-        f"PIXAR 3D cartoon style, {character_block}. Setting: {region}. Scene: {scene_text}. "
-        f"This illustration must look STRIKINGLY, OBVIOUSLY different from every other page in "
-        f"this book at a glance - a different pose and action for each character, a different "
-        f"camera framing/shot type, a different specific spot, different background scenery, "
-        f"and different lighting, all matching the scene description above. Never a generic or "
-        f"repeated composition. "
-        f"Each character's appearance must exactly match their fixed description above - "
-        f"identical faces, eye color, hairstyle, hair color, skin/fur tone, and outfit colors "
-        f"every time. Do NOT add any accessories, glasses, hats, goggles, bows, or props onto a "
-        f"character's body that aren't part of their fixed appearance above, even if similar "
-        f"objects appear elsewhere in the scene. "
-        f"Kid-safe soft pastel colors."
-    )
+    prompt = build_prompt(character_block, scene_text, region, page_number, total_pages)
 
     last_error = None
     for attempt in range(MAX_PROMPT_ADJUST_ATTEMPTS):
         try:
-            return _add_watermark(_deepai_image(prompt), watermark_text)
+            return _add_watermark(_deepai_image(prompt), watermark_text), prompt
         except UnsafeContentError as e:
             print(f"[kertoons] image prompt flagged unsafe (attempt {attempt + 1}/"
                   f"{MAX_PROMPT_ADJUST_ATTEMPTS}), retrying with an adjusted prompt: {e}")

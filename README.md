@@ -44,19 +44,31 @@ regenerate/publish rendering shared by `create.html` and `story.html`;
 Each page's illustration prompt is shown in an editable textarea between the
 image and the "Regenerate image" button (`static/book.js`'s
 `buildPagesHtml()`/`regenerateImage()`, owner-only, same as the button
-itself). Editing it and clicking Regenerate sends that exact text to the
-image API verbatim (`image_client.generate_scene_image`'s `custom_prompt`
-param) instead of the usual character-block + scene-text + fixed
-boilerplate composition - the point of exposing it is that what you type is
-what gets sent, not something wrapped further. No automatic "unsafe
-content" softening retry applies to a custom prompt either, for the same
-reason - a rejection is surfaced directly so you can adjust the wording
-yourself. On success the edited text is saved back onto that page's
-`image_prompt` in `story.json`, so it's what you see (and can edit again)
-next time, and what the image-usage log (`usage.html`) records. Leaving the
-box unchanged (or clearing it) falls back to the original
-character-consistency-driven generation, same as before this feature
-existed.
+itself). What's shown is **always the exact, complete prompt that produced
+the image currently on disk** - `image_client.generate_scene_image()`
+returns `(image_bytes, prompt_used)`, and `pipeline.py` unconditionally
+saves `prompt_used` onto that page's `image_prompt` in `story.json` every
+time an image is generated or regenerated, whether or not the box was
+edited. This replaced an earlier version of this field that held a
+separately LLM-authored *approximation* of the prompt rather than what was
+actually sent - the box could show something subtly different from reality.
+
+Editing the box and clicking Regenerate sends that exact text to the image
+API verbatim (`custom_prompt` param) instead of the usual character-block +
+scene-text + fixed boilerplate composition - the point of exposing it is
+that what you type is what gets sent, not something wrapped further. No
+automatic "unsafe content" softening retry applies to a custom prompt
+either, for the same reason - a rejection is surfaced directly so you can
+adjust the wording yourself. Leaving the box unchanged (or clearing it)
+regenerates using the original character-consistency-driven composition.
+
+**Every page's default composed prompt also embeds an explicit "this is
+page N of TOTAL" clause** (`image_client.build_prompt()`), guaranteeing the
+exact prompt text can never be byte-identical across two pages of the same
+story even if the story model ever writes near-duplicate scene descriptions
+for two of them - a text-to-image API given the same prompt twice tends to
+return the same or near-identical image, so this is a concrete guarantee of
+per-page uniqueness, not just an instruction asking the model nicely.
 
 ## Image credits & buying more
 

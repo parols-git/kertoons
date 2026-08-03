@@ -124,18 +124,26 @@ def run_job(job: dict, job_dir: str):
                     break
 
             scene_text = page.get("panel_visual") or page.get("text", "")
-            image_bytes = image_client.generate_scene_image(
+            image_bytes, prompt_used = image_client.generate_scene_image(
                 character_block,
                 scene_text,
                 region=story.get("region", ""),
                 characters=relevant_characters,
                 reference_image_bytes=reference_bytes,
+                page_number=page["page_number"],
+                total_pages=total_pages,
             )
             filename = f"page_{page['page_number']}.png"
             with open(os.path.join(job_dir, filename), "wb") as f:
                 f.write(image_bytes)
             page["image_file"] = filename
             page["reference_source_page"] = reference_from_page  # None on a character's debut
+            # Always the EXACT prompt that produced this image (see
+            # generate_scene_image's return contract) - overwrites whatever
+            # the story model itself guessed for this field, so the
+            # "Regenerate image" box always shows/edits reality, not an
+            # LLM-authored approximation of it.
+            page["image_prompt"] = prompt_used
 
             db.record_image_generation(
                 job["user_id"], job["job_id"], page["page_number"],
@@ -185,9 +193,10 @@ def regenerate_page_image(job_dir: str, page_number: int, user_id: int, custom_p
     is a fresh roll of the same inputs, not a differently-conditioned one -
     UNLESS `custom_prompt` is given (the user edited the prompt shown under
     the image in the UI), in which case that text is sent to the image API
-    verbatim instead (see image_client.generate_scene_image) and saved back
-    onto the page as its new `image_prompt`, so it's what's shown/edited
-    again next time and what a future export's usage log reflects.
+    verbatim instead (see image_client.generate_scene_image). Either way,
+    the page's `image_prompt` is always overwritten with whatever prompt
+    actually produced the new image, so it's exactly what's shown/edited
+    again next time - never a stale or approximated value.
 
     `user_id` is the caller (server.py already verified they own this
     story) - this counts against their image-generation credits and gets
@@ -215,24 +224,36 @@ def regenerate_page_image(job_dir: str, page_number: int, user_id: int, custom_p
                 reference_bytes = f.read()
 
     scene_text = page.get("panel_visual") or page.get("text", "")
-    image_bytes = image_client.generate_scene_image(
+    total_pages = len(story.get("pages", []))
+    image_bytes, prompt_used = image_client.generate_scene_image(
         character_block,
         scene_text,
         region=story.get("region", ""),
         characters=relevant_characters,
         reference_image_bytes=reference_bytes,
         custom_prompt=custom_prompt,
+        page_number=page_number,
+        total_pages=total_pages,
     )
     image_file = page.get("image_file") or f"page_{page_number}.png"
     with open(os.path.join(job_dir, image_file), "wb") as f:
         f.write(image_bytes)
 
-    log_prompt = _log_prompt(character_block, story.get("region", ""), scene_text)
-    if custom_prompt and custom_prompt.strip():
-        log_prompt = custom_prompt.strip()
-        page["image_prompt"] = log_prompt
-        with open(story_path, "w", encoding="utf-8") as f:
-            json.dump(story, f, ensure_ascii=False, indent=2)
+    # Always the EXACT prompt that produced this image - whether that's the
+    # user's own edited text or the default composed prompt (see
+    # generate_scene_image's return contract) - so the box always shows/
+    # edits reality, never a stale value from before this regeneration.
+    page["image_prompt"] = prompt_used
+    with open(story_path, "w", encoding="utf-8") as f:
+        json.dump(story, f, ensure_ascii=False, indent=2)
+
+    # The usage-history table (usage.html) stays on the shorter, boilerplate-
+    # free summary for the default path - prompt_used there is the FULL
+    # composed prompt including all the fixed instruction text, which would
+    # make every log row unreadable. A custom prompt has no such boilerplate
+    # to trim, so it's used as-is.
+    log_prompt = prompt_used if (custom_prompt and custom_prompt.strip()) \
+        else _log_prompt(character_block, story.get("region", ""), scene_text)
 
     job_id = os.path.basename(os.path.normpath(job_dir))
     db.record_image_generation(
