@@ -315,6 +315,8 @@ async function loadSettings() {
     const data = await res.json();
     document.getElementById("settings-site-name").value = data.site_name || "";
     document.getElementById("settings-footer-text").value = data.footer_text || "";
+    document.getElementById("settings-contact-email").value = data.contact_email || "";
+    document.getElementById("settings-contact-phone").value = data.contact_phone || "";
   } catch (e) {
     console.error(e);
   }
@@ -405,10 +407,12 @@ document.getElementById("settings-form").addEventListener("submit", async (ev) =
   ev.preventDefault();
   const site_name = document.getElementById("settings-site-name").value.trim();
   const footer_text = document.getElementById("settings-footer-text").value.trim();
+  const contact_email = document.getElementById("settings-contact-email").value.trim();
+  const contact_phone = document.getElementById("settings-contact-phone").value.trim();
   try {
     const res = await fetch("api/admin/settings", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ site_name, footer_text }),
+      body: JSON.stringify({ site_name, footer_text, contact_email, contact_phone }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "Failed to save settings");

@@ -260,6 +260,8 @@ class Handler(BaseHTTPRequestHandler):
                     "credit_pack_price_usd": payments.CREDIT_PACK_PRICE_USD_CENTS / 100,
                     "site_name": site_settings["site_name"],
                     "footer_text": site_settings["footer_text"],
+                    "contact_email": site_settings["contact_email"],
+                    "contact_phone": site_settings["contact_phone"],
                 })
                 return
 
@@ -939,10 +941,19 @@ class Handler(BaseHTTPRequestHandler):
                 body = self._read_json_body()
                 site_name = (body.get("site_name") or "").strip()
                 footer_text = (body.get("footer_text") or "").strip()
+                contact_email = (body.get("contact_email") or "").strip()
+                contact_phone = (body.get("contact_phone") or "").strip()
                 if not site_name:
                     self._send_error_json("site name is required", 400)
                     return
-                settings = db.set_site_settings(site_name, footer_text)
+                # Contact info is optional (blank hides the "Contact us"
+                # section entirely - see faq.html), but if given, at least
+                # a plausible email shape - typos here would otherwise
+                # silently publish a broken "Contact us" link to visitors.
+                if contact_email and "@" not in contact_email:
+                    self._send_error_json("contact email doesn't look valid", 400)
+                    return
+                settings = db.set_site_settings(site_name, footer_text, contact_email, contact_phone)
                 self._send_json({"ok": True, "settings": settings})
                 return
 

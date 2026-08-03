@@ -47,6 +47,27 @@ function _applyFooterText(footerText) {
   if (el && footerText) el.textContent = footerText;
 }
 
+// Contact info is opt-in (see db.DEFAULT_CONTACT_EMAIL/_PHONE, both blank
+// by default) - only shown on faq.html's #contact-card, and only the
+// email/phone rows that actually have a value, rather than a
+// half-empty-looking "Contact us" card if only one is set.
+function _applyContactInfo(email, phone) {
+  const card = document.getElementById("contact-card");
+  if (!card) return;
+  const emailRow = document.getElementById("contact-email-row");
+  const phoneRow = document.getElementById("contact-phone-row");
+  if (email && emailRow) {
+    document.getElementById("contact-email").textContent = email;
+    document.getElementById("contact-email-link").href = `mailto:${email}`;
+    emailRow.style.display = "block";
+  }
+  if (phone && phoneRow) {
+    document.getElementById("contact-phone").textContent = phone;
+    phoneRow.style.display = "block";
+  }
+  if (email || phone) card.style.display = "block";
+}
+
 async function renderNav() {
   let user = null;
   let cfg = {};
@@ -60,6 +81,7 @@ async function renderNav() {
 
   _applyBranding(cfg.site_name);
   _applyFooterText(cfg.footer_text);
+  _applyContactInfo(cfg.contact_email, cfg.contact_phone);
 
   const nav = document.getElementById("nav-bar");
   if (!nav) return user;

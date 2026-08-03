@@ -34,6 +34,10 @@ DEFAULT_IMAGE_CREDITS = 50
 
 DEFAULT_SITE_NAME = "Kertoons"
 DEFAULT_FOOTER_TEXT = "kertoons.com - Another Elisda AI project"
+# Contact info is opt-in - blank by default, so no "Contact us" section
+# appears anywhere until an admin actually sets one (see faq.html).
+DEFAULT_CONTACT_EMAIL = ""
+DEFAULT_CONTACT_PHONE = ""
 
 _SKELETON = {
     "next_user_id": 1,
@@ -44,7 +48,12 @@ _SKELETON = {
     "processed_payments": [],
     "coupons": [],
     "coupon_redemptions": [],
-    "site_settings": {"site_name": DEFAULT_SITE_NAME, "footer_text": DEFAULT_FOOTER_TEXT},
+    "site_settings": {
+        "site_name": DEFAULT_SITE_NAME,
+        "footer_text": DEFAULT_FOOTER_TEXT,
+        "contact_email": DEFAULT_CONTACT_EMAIL,
+        "contact_phone": DEFAULT_CONTACT_PHONE,
+    },
 }
 
 
@@ -549,21 +558,30 @@ def list_coupon_redemptions() -> list:
 # ---------------------------------------------------------- site settings
 
 def get_site_settings() -> dict:
-    """Admin-configurable branding - site display name and the trailing
-    footer message shown on every page. Falls back to the defaults for
-    data files saved before this feature existed."""
+    """Admin-configurable branding - site display name, the trailing footer
+    message, and optional contact info, all shown on every page. Falls back
+    to the defaults for data files saved before this feature existed (or
+    before contact_email/contact_phone specifically were added)."""
     with _LOCK:
         data = _load()
     settings = data.get("site_settings") or {}
     return {
         "site_name": settings.get("site_name") or DEFAULT_SITE_NAME,
         "footer_text": settings.get("footer_text") or DEFAULT_FOOTER_TEXT,
+        "contact_email": settings.get("contact_email") or DEFAULT_CONTACT_EMAIL,
+        "contact_phone": settings.get("contact_phone") or DEFAULT_CONTACT_PHONE,
     }
 
 
-def set_site_settings(site_name: str, footer_text: str) -> dict:
+def set_site_settings(site_name: str, footer_text: str,
+                       contact_email: str = "", contact_phone: str = "") -> dict:
     with _LOCK:
         data = _load()
-        data["site_settings"] = {"site_name": site_name, "footer_text": footer_text}
+        data["site_settings"] = {
+            "site_name": site_name,
+            "footer_text": footer_text,
+            "contact_email": contact_email,
+            "contact_phone": contact_phone,
+        }
         _save(data)
         return dict(data["site_settings"])

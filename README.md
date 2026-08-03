@@ -126,6 +126,12 @@ trust a client-reported role). From there an admin can:
   (`story_engine/share_page.py`) and exported PDFs
   (`story_engine/book_export.py` - cover subtitle, closing line, and the
   branded footer link on every page).
+- Optionally set a **contact email/phone** - blank by default, so no
+  "Contact us" section appears anywhere until an admin sets at least one.
+  Shown on `faq.html` (`#contact-card`), with the email and phone rows each
+  independently hidden if that particular field is blank rather than
+  showing an empty line. A submitted email is only checked for a plausible
+  shape (contains `@`) - not fully RFC-validated.
 
 ## The Storytelling Expert skill (used for every story)
 
