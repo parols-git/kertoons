@@ -70,6 +70,21 @@ for two of them - a text-to-image API given the same prompt twice tends to
 return the same or near-identical image, so this is a concrete guarantee of
 per-page uniqueness, not just an instruction asking the model nicely.
 
+## PDF download status bar
+
+Clicking a "Download {Language} PDF" button (`static/book.js`'s
+`downloadPdf()`) shows a status bar above the download row instead of the
+old plain `window.open(url)` (which gave zero feedback while the file was
+being built - increasingly worth noticing now that every embedded
+illustration is upscaled to 300 DPI, see "Editing a page's image prompt"
+above, making generation take a bit longer than before that existed). The
+PDF is fetched via `fetch()` into a blob (rather than a direct navigation)
+specifically so the request's lifecycle is trackable: an info banner while
+in flight, a success banner once the browser's own download is triggered
+(auto-clearing after a few seconds), or an error banner with the server's
+actual error message on failure. The download itself still uses the
+server's real filename (`Content-Disposition`) rather than a guessed one.
+
 ## Image credits & buying more
 
 Every image generated (a story's initial 5 pages, or any "Regenerate image"

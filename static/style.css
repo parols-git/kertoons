@@ -86,6 +86,8 @@ header p {
 .banner.mock { background: #fff3cd; color: #6b5300; border: 1px solid #f2d783; }
 .banner.success { background: #e4f6e7; color: #2e7d34; border: 1px solid #b7e4c0; }
 .banner.cancelled { background: #f1e9da; color: var(--muted); border: 1px solid var(--border); }
+.banner.info { background: #eaf3fd; color: var(--accent-2); border: 1px solid #cfe3fb; }
+.banner.error { background: #fdecec; color: var(--bad); border: 1px solid #f3c8c8; }
 
 main {
   max-width: 760px;

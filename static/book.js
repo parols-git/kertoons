@@ -106,6 +106,62 @@ function _updatePublishButton() {
   }
 }
 
+function _setPdfStatus(text, variant) {
+  const el = document.getElementById("pdf-status");
+  if (!el) return;
+  el.textContent = text;
+  el.className = variant ? `banner show ${variant}` : "banner";
+}
+
+// Fetches the PDF via JS (rather than a plain window.open(url)) so a status
+// bar can track the request's lifecycle - "Generating a story's images are
+// high-resolution (300 DPI) since a request was made for print-quality
+// downloads, so this can take a few seconds, whereas a direct window.open
+// gives no feedback at all while that's happening and can look like a dead
+// click. Buffers the whole response as a blob before triggering the actual
+// file download, since that's what makes "done" knowable in the first place.
+async function downloadPdf(btn, language, label) {
+  if (!_bookState) return;
+  const { jobId } = _bookState;
+  const originalLabel = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "Generating...";
+  _setPdfStatus(`⏳ Generating the ${label} PDF... this can take a moment for print-quality (300 DPI) art.`, "info");
+
+  try {
+    const res = await fetch(`api/story/download?job_id=${jobId}&format=pdf&language=${encodeURIComponent(language)}`);
+    if (!res.ok) {
+      let message = `Failed to generate PDF (HTTP ${res.status})`;
+      try { message = (await res.json()).error || message; } catch (e) { /* not JSON - use default */ }
+      throw new Error(message);
+    }
+    const blob = await res.blob();
+
+    // Prefer the server's own filename (Content-Disposition) over a guess,
+    // matching what a plain browser-native download would have shown.
+    const disposition = res.headers.get("Content-Disposition") || "";
+    const match = disposition.match(/filename="?([^"]+)"?/);
+    const filename = match ? match[1] : `${label.replace(/\s+/g, "_")}.pdf`;
+
+    const blobUrl = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = blobUrl;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 4000);
+
+    _setPdfStatus(`✅ ${label} PDF ready - download started.`, "success");
+    setTimeout(() => _setPdfStatus("", null), 4000);
+  } catch (err) {
+    _setPdfStatus(`❌ ${err.message}`, "error");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = originalLabel;
+  }
+}
+
 async function togglePublish() {
   if (!_bookState) return;
   const btn = document.getElementById("publish-btn");
@@ -152,9 +208,9 @@ function renderBook(container, jobId, story, opts = {}) {
   // mixed on the same page), per-book so a family can print/share just the
   // language they want.
   const pdfButtons = [
-    `<button class="btn-secondary" onclick="window.open('api/story/download?job_id=${jobId}&format=pdf&language=en', '_blank')">Download English PDF</button>`,
+    `<button class="btn-secondary" onclick="downloadPdf(this, 'en', 'English')">Download English PDF</button>`,
     ...languages.map(lang => (
-      `<button class="btn-secondary" onclick="window.open('api/story/download?job_id=${jobId}&format=pdf&language=${encodeURIComponent(lang)}', '_blank')">Download ${escapeHtml(lang)} PDF</button>`
+      `<button class="btn-secondary" onclick="downloadPdf(this, '${lang.replace(/'/g, "\\'")}', '${lang.replace(/'/g, "\\'")}')">Download ${escapeHtml(lang)} PDF</button>`
     )),
   ].join("");
 
@@ -178,6 +234,7 @@ function renderBook(container, jobId, story, opts = {}) {
         ${pdfButtons}
         <span id="share-btn-slot">${shareButtonHtml}</span>
       </div>
+      <div id="pdf-status" class="banner"></div>
       ${isOwner ? `<div class="publish-row"><button type="button" class="btn-outline" id="publish-btn" onclick="togglePublish()"></button></div>` : ""}
       <div class="chars-box">
         <h4>Characters (locked, identical wording used on every page)</h4>
