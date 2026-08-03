@@ -12,6 +12,8 @@ import zipfile
 import io
 import random
 
+from PIL import Image
+
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 from reportlab.lib.utils import ImageReader
@@ -321,6 +323,37 @@ def _draw_page_chrome(c, W, H, bg_rgb, accent_rgb):
     _draw_frame_and_footer(c, W, H, accent_rgb)
 
 
+# --------------------------------------------------------- print quality
+#
+# reportlab embeds a source image's raw pixels as-is - it never resamples
+# to the print box size - so a PDF's effective print DPI is just
+# native_pixels / (print_size_in_points / 72). The story illustration is
+# drawn at up to 482pt (letter width minus its 65pt margins on each side,
+# see `img_w` below) = ~6.69in, so a 300 DPI print needs a source image at
+# least ~2008px on a side. Both the mock generator and the real DeepAI API
+# may return something smaller than that (DeepAI's text2img default is well
+# under 1024px), so every embedded image is upscaled - never downscaled -
+# to this floor with high-quality Lanczos resampling before being drawn.
+_PRINT_DPI = 300
+_PRINT_TARGET_PX = round((letter[0] - 2 * 65) / 72 * _PRINT_DPI)  # ~2008px
+
+
+def _print_quality_reader(img_path: str) -> ImageReader:
+    """ImageReader for img_path, upscaled to _PRINT_TARGET_PX first if its
+    native resolution is smaller - so the PDF prints at a true 300 DPI
+    regardless of what resolution the image API actually returned. An
+    already-larger source image passes through unchanged (never
+    downsampled, so no quality loss if a future image API returns more)."""
+    with Image.open(img_path) as im:
+        im = im.convert("RGB")
+        if im.width < _PRINT_TARGET_PX or im.height < _PRINT_TARGET_PX:
+            im = im.resize((_PRINT_TARGET_PX, _PRINT_TARGET_PX), Image.LANCZOS)
+        buf = io.BytesIO()
+        im.save(buf, format="PNG")
+    buf.seek(0)
+    return ImageReader(buf)
+
+
 def _draw_polaroid(c, img_path: str, cx: float, cy: float, size: float, angle_deg: float):
     """Draw one square illustration as a small rotated, white-bordered
     'photo' centered at (cx, cy) - used up to 3 at a time, overlapping, to
@@ -344,7 +377,7 @@ def _draw_polaroid(c, img_path: str, cx: float, cy: float, size: float, angle_de
 
     inner = size - border * 2
     c.drawImage(
-        ImageReader(img_path), -size / 2 + border, -size / 2 + border,
+        _print_quality_reader(img_path), -size / 2 + border, -size / 2 + border,
         width=inner, height=inner, preserveAspectRatio=True, anchor="c",
     )
     c.restoreState()
@@ -597,7 +630,7 @@ def build_pdf(job_dir: str, language: str = None) -> bytes:
         c.roundRect(margin + 4, img_y - 4, img_w, img_h, 10, fill=1, stroke=0)
 
         if os.path.exists(img_path):
-            c.drawImage(ImageReader(img_path), margin, img_y, width=img_w, height=img_h,
+            c.drawImage(_print_quality_reader(img_path), margin, img_y, width=img_w, height=img_h,
                         preserveAspectRatio=True, anchor="n")
         else:
             c.setFillColorRGB(0.9, 0.9, 0.9)
