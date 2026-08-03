@@ -165,7 +165,7 @@ def _soften_prompt(character_block: str, scene_text: str, region: str, level: in
     if level == 1:
         return (
             f"Wholesome, G-rated, family-friendly children's picture-book illustration, "
-            f"3D cartoon style. Characters: {character_block}. Setting: {region}. "
+            f"PIXAR 3D cartoon style. Characters: {character_block}. Setting: {region}. "
             f"Scene: {scene_text}. Bright, cheerful, gentle mood, nothing scary or violent, "
             f"kid-safe soft pastel colors."
         )
@@ -175,7 +175,7 @@ def _soften_prompt(character_block: str, scene_text: str, region: str, level: in
     # gets the exact same generic prompt (differing only by region), which
     # would produce near-identical images for every one of them.
     return (
-        f"A warm, gentle, G-rated 3D cartoon illustration for a children's picture book, "
+        f"A warm, gentle, G-rated PIXAR-style 3D cartoon illustration for a children's picture book, "
         f"set in {region}. Scene: {scene_text}. Friendly, cheerful characters. Bright, "
         f"soft pastel colors, nothing scary, violent, or inappropriate."
     )
@@ -218,7 +218,7 @@ def generate_scene_image(character_block: str, scene_text: str, region: str = ""
         return _add_watermark(_deepai_image(custom_prompt.strip()), watermark_text)
 
     prompt = (
-        f"3D cartoon, {character_block}. Setting: {region}. Scene: {scene_text}. "
+        f"PIXAR 3D cartoon style, {character_block}. Setting: {region}. Scene: {scene_text}. "
         f"This illustration must look STRIKINGLY, OBVIOUSLY different from every other page in "
         f"this book at a glance - a different pose and action for each character, a different "
         f"camera framing/shot type, a different specific spot, different background scenery, "

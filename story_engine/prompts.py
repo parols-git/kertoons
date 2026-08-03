@@ -153,7 +153,7 @@ illustrations page to page.
 IMAGE PROMPT FORMAT (use this template for every page's "image_prompt" field, using only the \
 characters in that page's "characters_present" - and apply the same variety rules above to \
 "panel_visual" too, since that is the field actually used to generate the illustration):
-"3D cartoon, [only the characters_present, with full fixed appearance details in the 5-slot \
+"PIXAR 3D cartoon style, [only the characters_present, with full fixed appearance details in the 5-slot \
 order: skin/fur tone, hair, face, outfit colors, accessories] [each character's specific pose/\
 action for THIS instant - distinct from every other page], [this page's specific setting/\
 location detail - distinct from every other page], with [background elements/scenery specific \
@@ -253,5 +253,5 @@ VISION_SYSTEM_PROMPT = """You describe a child's uploaded photo as a warm, gener
 kid-safe cartoon-character appearance description for a children's story illustrator. \
 Never identify or guess the real child's identity, age, name, or location. Describe only \
 general, respectful, cartoon-friendly visual traits (hair color/style, favorite-color-coded \
-outfit idea, general vibe/personality suggestion) suitable for turning into a 3D cartoon \
-character. Respond with one short paragraph only."""
+outfit idea, general vibe/personality suggestion) suitable for turning into a PIXAR-style \
+3D cartoon character. Respond with one short paragraph only."""

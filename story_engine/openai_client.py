@@ -167,7 +167,7 @@ def _mock_story(initial_text: str, region: str) -> dict:
             "characters_present": present,
             "panel_visual": f"{char_block} {spot_and_style}, page {i}: {summary}",
             "image_prompt": (
-                f"3D cartoon, {char_block}, {spot_and_style}, kid-safe soft pastel colors"
+                f"PIXAR 3D cartoon style, {char_block}, {spot_and_style}, kid-safe soft pastel colors"
             ),
             "text": text,
         })
