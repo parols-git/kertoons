@@ -528,6 +528,16 @@ button {
   gap: 20px;
 }
 
+.marketing-banner {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  height: auto;
+  border-radius: 16px;
+  margin-top: 32px;
+  box-shadow: 0 4px 14px rgba(43, 37, 64, 0.06);
+}
+
 .gallery-card {
   display: block;
   background: var(--card);
