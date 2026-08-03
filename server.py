@@ -363,6 +363,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json({
                     "mock_story": bool(config.MOCK_STORY),
                     "mock_translation": bool(config.MOCK_TRANSLATION),
+                    "translation_provider": config.TRANSLATION_PROVIDER,
                     "mock_images": bool(config.MOCK_IMAGES),
                     "mock_payments": bool(config.MOCK_PAYMENTS),
                     "page_count": config.PAGE_COUNT,

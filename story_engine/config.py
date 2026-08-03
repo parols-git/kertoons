@@ -17,14 +17,21 @@ except Exception:
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "").strip()
 OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
 
-# Translation runs through Gemini instead of OpenAI (story generation and the
-# character-photo vision description stay on OpenAI - see openai_client.py).
+# Translation defaults to Gemini instead of OpenAI (a deliberate deviation
+# from the product spec's "OpenAI only" rule for story text - see
+# gemini_client.py) but is switchable back to OpenAI (story_engine/
+# openai_client.py's translate_story) by setting TRANSLATION_PROVIDER=openai
+# - useful if you'd rather depend on only one LLM provider for everything.
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
 # "-latest" alias (rather than a pinned version like "gemini-2.0-flash")
 # since Google retires pinned model versions over time and a hardcoded one
 # 404s once retired - the alias always points at Google's current
 # recommended flash model instead.
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-flash-latest")
+
+TRANSLATION_PROVIDER = os.environ.get("TRANSLATION_PROVIDER", "gemini").strip().lower()
+if TRANSLATION_PROVIDER not in ("gemini", "openai"):
+    TRANSLATION_PROVIDER = "gemini"
 
 # The product spec refers to an image API at "Deepak.org". No such API
 # could be found; the near-identical, real service is DeepAI (deepai.org),
@@ -76,7 +83,9 @@ PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "").strip()
 FORCE_MOCK = os.environ.get("FORCE_MOCK", "").strip().lower() in ("1", "true", "yes")
 
 MOCK_STORY = FORCE_MOCK or not OPENAI_API_KEY
-MOCK_TRANSLATION = FORCE_MOCK or not GEMINI_API_KEY
+MOCK_TRANSLATION = FORCE_MOCK or not (
+    GEMINI_API_KEY if TRANSLATION_PROVIDER == "gemini" else OPENAI_API_KEY
+)
 MOCK_IMAGES = FORCE_MOCK or not DEEPAI_API_KEY
 # Mock payments grant the credit pack for free instantly (clearly labeled as
 # a demo in the UI) instead of redirecting to a real Stripe Checkout page -

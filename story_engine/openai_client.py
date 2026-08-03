@@ -2,7 +2,10 @@
 Story generation and (optional) character-photo description, via the
 OpenAI Chat Completions API - the story-text engine per the product spec.
 
-Translation is handled separately, via Gemini - see gemini_client.py.
+Translation defaults to Gemini (gemini_client.py) but can be switched to
+run through this same OpenAI client instead by setting
+TRANSLATION_PROVIDER=openai (see config.py and this module's
+translate_story()) - see pipeline.py for the dispatch between the two.
 
 Every function has a MOCK fallback (used automatically when OPENAI_API_KEY
 is not set, or when FORCE_MOCK=1) so the full app can be run and tested
@@ -13,7 +16,10 @@ import base64
 
 from . import config
 from .api_utils import StoryGenerationError, post_with_retry
-from .prompts import SYSTEM_PROMPT, build_user_prompt, VISION_SYSTEM_PROMPT
+from .prompts import (
+    SYSTEM_PROMPT, build_user_prompt, VISION_SYSTEM_PROMPT,
+    TRANSLATE_SYSTEM_PROMPT, build_translate_user_prompt,
+)
 
 OPENAI_CHAT_URL = "https://api.openai.com/v1/chat/completions"
 
@@ -179,6 +185,53 @@ def _mock_story(initial_text: str, region: str) -> dict:
         "pages": pages,
         "_mock": True,
     }
+
+
+# -------------------------------------------------------------- translation
+#
+# Only used when config.TRANSLATION_PROVIDER == "openai" (default is
+# "gemini" - see gemini_client.translate_story, which this mirrors exactly:
+# same prompts.py templates, same story-mutation shape, same per-language-
+# additive behavior, same MOCK_TRANSLATION fallback pattern) - kept as a
+# separate, self-contained function here rather than sharing code across
+# the two provider modules, consistent with how every other provider in
+# this app (OpenAI/Gemini/DeepAI/Stripe) is its own independent module.
+
+def translate_story(story: dict, target_language: str) -> dict:
+    if not target_language:
+        return story
+    if config.MOCK_TRANSLATION:
+        return _mock_translate(story, target_language)
+
+    messages = [
+        {"role": "system", "content": TRANSLATE_SYSTEM_PROMPT},
+        {"role": "user", "content": build_translate_user_prompt(story, target_language)},
+    ]
+    result = _chat(messages)
+    translated_by_page = {p["page_number"]: p["text"] for p in result.get("pages", [])}
+    _store_translation(story, target_language, translated_by_page)
+    return story
+
+
+def _mock_translate(story: dict, target_language: str) -> dict:
+    translated_by_page = {
+        page["page_number"]: f"[{target_language} mock translation] {page['text']}"
+        for page in story["pages"]
+    }
+    _store_translation(story, target_language, translated_by_page)
+    story["_mock_translation"] = True
+    return story
+
+
+def _store_translation(story: dict, target_language: str, translated_by_page: dict):
+    story.setdefault("translations", {})[target_language] = translated_by_page
+    for page in story["pages"]:
+        page.setdefault("translations", {})[target_language] = (
+            translated_by_page.get(page["page_number"], "")
+        )
+    languages = story.setdefault("languages", [])
+    if target_language not in languages:
+        languages.append(target_language)
 
 
 # --------------------------------------------------------- optional: vision

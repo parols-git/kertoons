@@ -29,7 +29,10 @@ async function loadConfig() {
     if (cfg.page_count) storyPageCount = cfg.page_count;
     const notes = [];
     if (cfg.mock_story) notes.push("story text is MOCK (set OPENAI_API_KEY to use real OpenAI)");
-    if (cfg.mock_translation) notes.push("translation is MOCK (set GEMINI_API_KEY to use real Gemini)");
+    if (cfg.mock_translation) {
+      const providerKey = cfg.translation_provider === "openai" ? "OPENAI_API_KEY" : "GEMINI_API_KEY";
+      notes.push(`translation is MOCK (set ${providerKey} to use real ${cfg.translation_provider === "openai" ? "OpenAI" : "Gemini"})`);
+    }
     if (cfg.mock_images) notes.push("images are MOCK placeholders (set DEEPAI_API_KEY to use real art)");
     if (cfg.mock_payments) notes.push("\"Add credits\" is a free MOCK top-up (set STRIPE_SECRET_KEY to sell real credits)");
     if (notes.length) {

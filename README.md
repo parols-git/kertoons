@@ -307,7 +307,8 @@ from `.env`, the app automatically runs that part in **mock mode**:
   translation plumbing, and PDF/ZIP export without calling OpenAI.
 - **Mock translation**: each page's text prefixed with `[<language> mock
   translation]` so the multi-language plumbing and per-language PDFs can be
-  tested without calling Gemini.
+  tested without calling Gemini (or OpenAI, if `TRANSLATION_PROVIDER=openai`
+  - see "Translation provider" below).
 - **Mock images**: Pillow-rendered placeholder illustrations (no network
   call) standing in for the real 3D cartoon art.
 
@@ -317,6 +318,21 @@ live generation - no code changes needed.
 
 This was actually run and tested locally in mock mode while building it (see
 "What was tested" below).
+
+## Translation provider
+
+Translation defaults to **Gemini** (`GEMINI_API_KEY`), a deliberate deviation
+from the product spec's "OpenAI only" rule (see the table above). Set
+`TRANSLATION_PROVIDER=openai` in `.env` to run translation through OpenAI
+instead - it reuses `OPENAI_API_KEY`/`OPENAI_MODEL` (no separate key needed)
+via `story_engine/openai_client.py`'s own `translate_story()`, which mirrors
+`gemini_client.py`'s one exactly (same `TRANSLATE_SYSTEM_PROMPT`/
+`build_translate_user_prompt`, same per-language-additive story mutation,
+same mock fallback). `story_engine/pipeline.py` picks whichever function to
+call based on `config.TRANSLATION_PROVIDER`; an invalid value falls back to
+`"gemini"`. Whichever provider is active, `MOCK_TRANSLATION` (and the
+demo-mode banner) is based on *that* provider's own API key being set, not
+the other one's.
 
 ## About "Deepak.org"
 
@@ -340,7 +356,7 @@ change - everything else (pipeline, UI, export) is provider-agnostic.
 | Images via "Deepak.org"(/DeepAI) only | `story_engine/image_client.py` |
 | Region influences visuals/culture/language | Baked into `SYSTEM_PROMPT` + `build_user_prompt` |
 | Character consistency (name/look/personality fixed) | See "Character consistency strategy" below |
-| Translation to a user-specified language, names preserved | `story_engine/gemini_client.py` (`translate_story`) + `TRANSLATE_SYSTEM_PROMPT` - **via Gemini, not OpenAI** (explicit deviation from the spec's OpenAI-only rule) |
+| Translation to a user-specified language, names preserved | `story_engine/gemini_client.py` (`translate_story`) + `TRANSLATE_SYSTEM_PROMPT` - **via Gemini by default, not OpenAI** (explicit deviation from the spec's OpenAI-only rule), switchable to OpenAI with `TRANSLATION_PROVIDER=openai` (`story_engine/openai_client.py`'s own `translate_story`, same prompts/behavior) - see `story_engine/pipeline.py`'s dispatch |
 | Safety rules (no fear/violence/stereotypes, soft moral) | Hard-coded into `SYSTEM_PROMPT` |
 | Assemble into downloadable PDF/ZIP storybook | `story_engine/book_export.py`, `/api/story/download` |
 | Optional: upload a kid's photo to inspire a character | `describe_character_photo()` (OpenAI vision) + upload field in the form |

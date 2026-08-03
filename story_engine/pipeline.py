@@ -74,9 +74,13 @@ def run_job(job: dict, job_dir: str):
 
         secondary_language = job.get("secondary_language", "").strip()
         languages = _parse_languages(secondary_language)
+        translate_story = (
+            openai_client.translate_story if config.TRANSLATION_PROVIDER == "openai"
+            else gemini_client.translate_story
+        )
         for lang in languages:
             job["message"] = f"Translating into {lang}..."
-            story = gemini_client.translate_story(story, lang)
+            story = translate_story(story, lang)
         job["progress"] = 48
 
         # Character consistency strategy:

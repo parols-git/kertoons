@@ -1,8 +1,11 @@
 """
-Story translation, via the Gemini API.
+Story translation, via the Gemini API - the default translation provider
+(config.TRANSLATION_PROVIDER == "gemini"). Switchable to run through OpenAI
+instead (see openai_client.py's translate_story(), TRANSLATION_PROVIDER=
+openai) - pipeline.py dispatches between the two.
 
-Story generation and the character-photo vision description stay on OpenAI
-(see openai_client.py) - only the translation step runs through Gemini.
+Story generation and the character-photo vision description always stay on
+OpenAI regardless of the translation provider (see openai_client.py).
 
 A story can be translated into MULTIPLE languages (e.g. "Hindi, Tamil,
 Spanish" typed into one field), and pipeline.py calls translate_story() once
