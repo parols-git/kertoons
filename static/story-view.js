@@ -21,6 +21,7 @@ async function loadStory() {
       isOwner: data.is_owner,
       published: data.published,
       author: data.author,
+      pdfAvailable: data.pdf_available,
     });
     bookSection.classList.add("show");
   } catch (err) {

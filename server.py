@@ -44,7 +44,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 from story_engine import config, db, auth, payments, share_page
 from story_engine.pipeline import run_job, regenerate_page_image
-from story_engine.book_export import build_zip, get_pdf
+from story_engine.book_export import build_zip, get_pdf, pdf_filename
 from story_engine.image_client import ImageGenerationError
 
 JOBS = {}
@@ -534,12 +534,24 @@ class Handler(BaseHTTPRequestHandler):
                 owner_id = db.get_story_owner_id(job_id)
                 owner = db.get_user_by_id(owner_id)
                 user = self._current_user()
+                job_dir = os.path.join(config.GENERATED_DIR, job_id)
+                # Lets the UI label each PDF button "Download" vs "Generate"
+                # per language/quality up front, reflecting exactly what
+                # get_pdf() would do (reuse vs. build) if clicked right now.
+                pdf_available = {
+                    lang_key: {
+                        "high": os.path.isfile(os.path.join(job_dir, pdf_filename(lang_arg, "high"))),
+                        "low": os.path.isfile(os.path.join(job_dir, pdf_filename(lang_arg, "low"))),
+                    }
+                    for lang_key, lang_arg in [("en", None)] + [(lang, lang) for lang in story.get("languages", [])]
+                }
                 self._send_json({
                     "job_id": job_id,
                     "story": story,
                     "author": owner["username"] if owner else "unknown",
                     "is_owner": bool(user and user["id"] == owner_id),
                     "published": db.is_story_published(job_id),
+                    "pdf_available": pdf_available,
                 })
                 return
 

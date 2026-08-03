@@ -4,7 +4,35 @@
 // after generating a fresh story) and story-view.js (viewing any story by
 // job_id - one's own, or someone else's published one).
 
-let _bookState = null; // { jobId, story, isOwner, published }
+let _bookState = null; // { jobId, story, isOwner, published, pdfAvailable }
+
+// The server keys pdf_available by "en" for the original-language book and
+// by the exact language string (as in story.languages) for every
+// translation - this maps a downloadPdf()-style language argument to that
+// same key so the two sides always agree on which entry to read/update.
+function _pdfAvailabilityKey(language) {
+  const norm = (language || "").trim().toLowerCase();
+  return (!norm || ["en", "english", "original"].includes(norm)) ? "en" : language;
+}
+
+function _pdfButtonLabel(available, label) {
+  return available ? `📥 Download ${label} PDF` : `⚙️ Generate ${label} PDF`;
+}
+
+// Re-labels every PDF button from _bookState.pdfAvailable against whichever
+// quality tier is currently selected - high and low are cached separately
+// (see book_export.get_pdf), so a language can be "Download" at one quality
+// and "Generate" at the other.
+function _updateAllPdfButtonLabels() {
+  if (!_bookState) return;
+  const quality = _selectedPdfQuality();
+  const availability = _bookState.pdfAvailable || {};
+  document.querySelectorAll("[data-pdf-lang]").forEach(btn => {
+    if (btn.disabled) return;
+    const avail = availability[btn.dataset.pdfLang];
+    btn.textContent = _pdfButtonLabel(!!(avail && avail[quality]), btn.dataset.pdfLabel);
+  });
+}
 
 function escapeHtml(str) {
   if (str === undefined || str === null) return "";
@@ -134,7 +162,7 @@ async function downloadPdf(btn, language, label) {
   if (!_bookState) return;
   const { jobId } = _bookState;
   const quality = _selectedPdfQuality();
-  const originalLabel = btn.textContent;
+  const langKey = _pdfAvailabilityKey(language);
   btn.disabled = true;
   btn.textContent = "Generating...";
   _setPdfStatus(
@@ -170,11 +198,18 @@ async function downloadPdf(btn, language, label) {
 
     _setPdfStatus(`✅ ${label} PDF ready - download started.`, "success");
     setTimeout(() => _setPdfStatus("", null), 4000);
+
+    // This exact (language, quality) is now cached on disk by get_pdf(), so
+    // every button showing it - not just this one - should read "Download"
+    // from here on, without needing a page reload.
+    if (!_bookState.pdfAvailable) _bookState.pdfAvailable = {};
+    if (!_bookState.pdfAvailable[langKey]) _bookState.pdfAvailable[langKey] = {};
+    _bookState.pdfAvailable[langKey][quality] = true;
   } catch (err) {
     _setPdfStatus(`❌ ${err.message}`, "error");
   } finally {
     btn.disabled = false;
-    btn.textContent = originalLabel;
+    _updateAllPdfButtonLabels();
   }
 }
 
@@ -213,7 +248,7 @@ function renderBook(container, jobId, story, opts = {}) {
   const languages = story.languages || [];
   const allLanguages = ["English", ...languages];
 
-  _bookState = { jobId, story, isOwner, published: !!opts.published };
+  _bookState = { jobId, story, isOwner, published: !!opts.published, pdfAvailable: opts.pdfAvailable || {} };
 
   const langButtonsHtml = allLanguages.map(lang => (
     `<button type="button" class="lang-btn${lang === "English" ? " active" : ""}" data-lang="${escapeHtml(lang)}" onclick="selectLanguage('${lang.replace(/'/g, "\\'")}')">${escapeHtml(lang)}</button>`
@@ -222,13 +257,18 @@ function renderBook(container, jobId, story, opts = {}) {
   // One PDF download button for English, plus one more per translated
   // language - each is its own standalone storybook (not English+translation
   // mixed on the same page), per-book so a family can print/share just the
-  // language they want.
-  const pdfButtons = [
-    `<button class="btn-secondary" onclick="downloadPdf(this, 'en', 'English')">Download English PDF</button>`,
-    ...languages.map(lang => (
-      `<button class="btn-secondary" onclick="downloadPdf(this, '${lang.replace(/'/g, "\\'")}', '${lang.replace(/'/g, "\\'")}')">Download ${escapeHtml(lang)} PDF</button>`
-    )),
-  ].join("");
+  // language they want. Initial label reflects whichever quality tier is
+  // checked by default ("high") via _bookState.pdfAvailable, set just above;
+  // _updateAllPdfButtonLabels() re-derives it from data-pdf-lang/-label
+  // whenever the quality selector changes or a download completes.
+  const initialQuality = "high";
+  const pdfButtonSpec = [{ key: "en", arg: "en", label: "English" },
+    ...languages.map(lang => ({ key: lang, arg: lang, label: lang }))];
+  const pdfButtons = pdfButtonSpec.map(({ key, arg, label }) => {
+    const avail = _bookState.pdfAvailable[key];
+    const text = _pdfButtonLabel(!!(avail && avail[initialQuality]), label);
+    return `<button class="btn-secondary" data-pdf-lang="${escapeHtml(key)}" data-pdf-label="${escapeHtml(label)}" onclick="downloadPdf(this, '${arg.replace(/'/g, "\\'")}', '${label.replace(/'/g, "\\'")}')">${escapeHtml(text)}</button>`;
+  }).join("");
 
   // Sharing only makes sense once a story is published - an unpublished
   // one isn't visible to anyone a share link would be sent to (see
@@ -248,8 +288,8 @@ function renderBook(container, jobId, story, opts = {}) {
       </div>
       <div class="pdf-quality-row">
         <span class="pdf-quality-label">PDF quality:</span>
-        <label><input type="radio" name="pdf-quality" value="high" checked> High (print, 300 DPI)</label>
-        <label><input type="radio" name="pdf-quality" value="low"> Low (screen, smaller file)</label>
+        <label><input type="radio" name="pdf-quality" value="high" checked onchange="_updateAllPdfButtonLabels()"> High (print, 300 DPI)</label>
+        <label><input type="radio" name="pdf-quality" value="low" onchange="_updateAllPdfButtonLabels()"> Low (screen, smaller file)</label>
       </div>
       <div class="download-row">
         ${pdfButtons}

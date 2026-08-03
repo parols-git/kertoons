@@ -127,6 +127,17 @@ deletes every cached PDF for a job (all languages, both quality tiers)
 the moment any page's image changes, since they'd otherwise keep serving
 stale art forever.
 
+Each download button's label reflects that cache directly: "📥 Download
+{Language} PDF" if that language+quality is already on disk, or "⚙️
+Generate {Language} PDF" if clicking it will build one from scratch.
+`GET /api/story/view` computes this per language via `pdf_filename()` +
+`os.path.isfile()` and returns it as `pdf_available` (`server.py`);
+`static/book.js` uses it to label buttons on load, re-labels them whenever
+the quality radio changes (high/low are cached independently, so a
+language can be "Download" at one tier and "Generate" at the other), and
+flips a button to "Download" the moment its own download finishes -
+without waiting for a page reload.
+
 ## Image credits & buying more
 
 Every image generated (a story's initial 5 pages, or any "Regenerate image"
