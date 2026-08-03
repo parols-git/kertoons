@@ -40,6 +40,7 @@ from urllib.parse import urlparse, parse_qs
 from story_engine import config, db, auth, payments, share_page
 from story_engine.pipeline import run_job, regenerate_page_image
 from story_engine.book_export import build_zip, build_pdf
+from story_engine.image_client import ImageGenerationError
 
 JOBS = {}
 JOBS_LOCK = threading.Lock()
@@ -61,6 +62,10 @@ MIN_CREDITS_TO_GENERATE = 0
 # instead redirects to a real $5-for-50-credits Stripe Checkout page (see
 # story_engine/payments.py).
 ADD_CREDITS_AMOUNT = 20
+# Sent straight to the image API verbatim when regenerating (see
+# image_client.generate_scene_image's custom_prompt) - capped generously
+# above what a real image prompt needs, just to stop a pathological payload.
+MAX_CUSTOM_PROMPT_LEN = 2000
 
 
 def new_job_id():
@@ -719,6 +724,7 @@ class Handler(BaseHTTPRequestHandler):
                 body = self._read_json_body()
                 job_id = (body.get("job_id") or "").strip()
                 page_number = body.get("page_number")
+                custom_prompt = (body.get("prompt") or "").strip() or None
 
                 if not _JOB_ID_RE.fullmatch(job_id):
                     self._send_error_json("invalid job_id", 400)
@@ -727,6 +733,9 @@ class Handler(BaseHTTPRequestHandler):
                     page_number = int(page_number)
                 except (TypeError, ValueError):
                     self._send_error_json("page_number must be an integer", 400)
+                    return
+                if custom_prompt and len(custom_prompt) > MAX_CUSTOM_PROMPT_LEN:
+                    self._send_error_json(f"prompt is too long (max {MAX_CUSTOM_PROMPT_LEN} characters)", 400)
                     return
 
                 owner_id = db.get_story_owner_id(job_id)
@@ -753,9 +762,16 @@ class Handler(BaseHTTPRequestHandler):
                     return
 
                 try:
-                    regenerate_page_image(job_dir, page_number, owner_id)
+                    regenerate_page_image(job_dir, page_number, owner_id, custom_prompt=custom_prompt)
                 except ValueError as e:
                     self._send_error_json(str(e), 404)
+                    return
+                except ImageGenerationError as e:
+                    # Most often an edited prompt the image API itself
+                    # rejected (e.g. flagged unsafe) - surfaced directly so
+                    # the user can adjust their wording and retry, rather
+                    # than the generic 500 the outer handler would send.
+                    self._send_error_json(f"Could not generate image: {e}", 502)
                     return
 
                 self._send_json({"ok": True, "job_id": job_id, "page_number": page_number})

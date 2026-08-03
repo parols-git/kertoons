@@ -25,7 +25,10 @@ function buildPagesHtml(story, jobId, lang, isOwner) {
     <div class="page-card">
       <div class="page-image-wrap">
         <img id="page-img-${p.page_number}" src="api/story/image?job_id=${jobId}&page=${p.page_number}" alt="Page ${p.page_number} illustration">
-        ${isOwner ? `<button type="button" class="btn-outline btn-regen" id="regen-btn-${p.page_number}"
+        ${isOwner ? `
+                <textarea class="prompt-textarea" id="prompt-input-${p.page_number}"
+                    placeholder="Image prompt...">${escapeHtml(p.image_prompt || "")}</textarea>
+                <button type="button" class="btn-outline btn-regen" id="regen-btn-${p.page_number}"
                 onclick="regenerateImage(${p.page_number})">🔄 Regenerate image</button>` : ""}
       </div>
       <div class="page-text">
@@ -41,6 +44,7 @@ async function regenerateImage(pageNumber) {
   const { jobId } = _bookState;
   const btn = document.getElementById(`regen-btn-${pageNumber}`);
   const img = document.getElementById(`page-img-${pageNumber}`);
+  const promptBox = document.getElementById(`prompt-input-${pageNumber}`);
   if (!btn || !img) return;
 
   const originalLabel = btn.textContent;
@@ -51,13 +55,18 @@ async function regenerateImage(pageNumber) {
     const res = await fetch("api/story/regenerate_image", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ job_id: jobId, page_number: pageNumber }),
+      body: JSON.stringify({ job_id: jobId, page_number: pageNumber, prompt: promptBox ? promptBox.value : undefined }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "Failed to regenerate image");
     // Cache-bust: same filename on the server, so the browser must be told
     // this is a new image rather than reusing its cached copy.
     img.src = `api/story/image?job_id=${jobId}&page=${pageNumber}&v=${Date.now()}`;
+    // Keep the in-memory story object in sync so switching languages (which
+    // re-renders this page's card from _bookState.story) doesn't revert the
+    // textarea back to the pre-edit prompt.
+    const page = (_bookState.story.pages || []).find(pg => pg.page_number === pageNumber);
+    if (page && promptBox && promptBox.value.trim()) page.image_prompt = promptBox.value.trim();
   } catch (err) {
     alert(err.message);
   } finally {

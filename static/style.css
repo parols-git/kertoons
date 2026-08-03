@@ -281,6 +281,19 @@ button {
   box-shadow: 0 6px 18px rgba(43, 37, 64, 0.1);
 }
 
+.prompt-textarea {
+  width: 100%;
+  max-width: 520px;
+  min-height: 60px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-size: 0.82rem;
+  font-family: inherit;
+  color: var(--ink);
+  resize: vertical;
+}
+
 .btn-regen {
   padding: 6px 14px;
   font-size: 0.78rem;

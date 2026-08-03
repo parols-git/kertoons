@@ -171,7 +171,7 @@ def run_job(job: dict, job_dir: str):
         job["trace"] = traceback.format_exc()
 
 
-def regenerate_page_image(job_dir: str, page_number: int, user_id: int):
+def regenerate_page_image(job_dir: str, page_number: int, user_id: int, custom_prompt: str = None):
     """Re-generate a single page's illustration in place (the "Regenerate
     image" button in the UI) and overwrite that page's PNG file on disk.
     PDF/ZIP export (book_export.py) always reads each page's image straight
@@ -182,9 +182,12 @@ def regenerate_page_image(job_dir: str, page_number: int, user_id: int):
     Reuses the exact same character-prompt block and reference image the
     original job used for this page (stored on the page at generation time:
     `character_prompt`, `reference_source_page`), so the regenerated image
-    is a fresh roll of the same inputs, not a differently-conditioned one.
-    Does NOT cascade to any later page that used THIS page's image as its
-    own reference - only the requested page's file changes.
+    is a fresh roll of the same inputs, not a differently-conditioned one -
+    UNLESS `custom_prompt` is given (the user edited the prompt shown under
+    the image in the UI), in which case that text is sent to the image API
+    verbatim instead (see image_client.generate_scene_image) and saved back
+    onto the page as its new `image_prompt`, so it's what's shown/edited
+    again next time and what a future export's usage log reflects.
 
     `user_id` is the caller (server.py already verified they own this
     story) - this counts against their image-generation credits and gets
@@ -218,14 +221,21 @@ def regenerate_page_image(job_dir: str, page_number: int, user_id: int):
         region=story.get("region", ""),
         characters=relevant_characters,
         reference_image_bytes=reference_bytes,
+        custom_prompt=custom_prompt,
     )
     image_file = page.get("image_file") or f"page_{page_number}.png"
     with open(os.path.join(job_dir, image_file), "wb") as f:
         f.write(image_bytes)
 
+    log_prompt = _log_prompt(character_block, story.get("region", ""), scene_text)
+    if custom_prompt and custom_prompt.strip():
+        log_prompt = custom_prompt.strip()
+        page["image_prompt"] = log_prompt
+        with open(story_path, "w", encoding="utf-8") as f:
+            json.dump(story, f, ensure_ascii=False, indent=2)
+
     job_id = os.path.basename(os.path.normpath(job_dir))
     db.record_image_generation(
-        user_id, job_id, page_number,
-        _log_prompt(character_block, story.get("region", ""), scene_text),
+        user_id, job_id, page_number, log_prompt,
         f"api/story/image?job_id={job_id}&page={page_number}",
     )

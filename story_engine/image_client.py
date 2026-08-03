@@ -183,7 +183,7 @@ def _soften_prompt(character_block: str, scene_text: str, region: str, level: in
 
 def generate_scene_image(character_block: str, scene_text: str, region: str = "",
                           characters: list = None, reference_image_bytes: bytes = None,
-                          size=(1024, 1024)) -> bytes:
+                          size=(1024, 1024), custom_prompt: str = None) -> bytes:
     """Generate one page's illustration, from text alone - see the
     CHARACTER CONSISTENCY STRATEGY note at the top of this file for why
     reference-image conditioning (DeepAI's Image Editor endpoint) was tried
@@ -196,11 +196,26 @@ def generate_scene_image(character_block: str, scene_text: str, region: str = ""
     - `reference_image_bytes`: accepted for backward compatibility with
       pipeline.py's character-debut-tracking bookkeeping, but intentionally
       UNUSED here - see above.
+    - `custom_prompt`: when a user has hand-edited the page's image prompt
+      in the "Regenerate image" box (see pipeline.regenerate_page_image),
+      sent to the image API VERBATIM instead of being wrapped in the usual
+      character-consistency boilerplate below - the whole point of exposing
+      it for editing is that what they typed is what gets sent. Only takes
+      effect for the real DeepAI path; the mock generator has no free-text
+      prompt input to honor (it draws deterministic sprites from
+      character_block/scene_text instead), so it's ignored there. No
+      automatic unsafe-content softening retry applies either - if the API
+      rejects a custom prompt, that's surfaced directly so the user can
+      edit and retry themselves, rather than silently substituting
+      different wording they didn't write.
     """
     watermark_text = db.get_site_settings()["site_name"]
 
     if config.MOCK_IMAGES:
         return _add_watermark(_mock_scene_image(character_block, scene_text, characters or [], size), watermark_text)
+
+    if custom_prompt and custom_prompt.strip():
+        return _add_watermark(_deepai_image(custom_prompt.strip()), watermark_text)
 
     prompt = (
         f"3D cartoon, {character_block}. Setting: {region}. Scene: {scene_text}. "

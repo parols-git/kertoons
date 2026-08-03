@@ -39,6 +39,25 @@ one story by `?job_id=`). `static/book.js` holds the page-card/language-switch/
 regenerate/publish rendering shared by `create.html` and `story.html`;
 `static/nav.js` renders the top nav (shared by every page).
 
+## Editing a page's image prompt before regenerating
+
+Each page's illustration prompt is shown in an editable textarea between the
+image and the "Regenerate image" button (`static/book.js`'s
+`buildPagesHtml()`/`regenerateImage()`, owner-only, same as the button
+itself). Editing it and clicking Regenerate sends that exact text to the
+image API verbatim (`image_client.generate_scene_image`'s `custom_prompt`
+param) instead of the usual character-block + scene-text + fixed
+boilerplate composition - the point of exposing it is that what you type is
+what gets sent, not something wrapped further. No automatic "unsafe
+content" softening retry applies to a custom prompt either, for the same
+reason - a rejection is surfaced directly so you can adjust the wording
+yourself. On success the edited text is saved back onto that page's
+`image_prompt` in `story.json`, so it's what you see (and can edit again)
+next time, and what the image-usage log (`usage.html`) records. Leaving the
+box unchanged (or clearing it) falls back to the original
+character-consistency-driven generation, same as before this feature
+existed.
+
 ## Image credits & buying more
 
 Every image generated (a story's initial 5 pages, or any "Regenerate image"
