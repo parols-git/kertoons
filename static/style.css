@@ -534,7 +534,7 @@ button {
   max-width: 100%;
   height: auto;
   border-radius: 16px;
-  margin-top: 32px;
+  margin-bottom: 32px;
   box-shadow: 0 4px 14px rgba(43, 37, 64, 0.06);
 }
 
