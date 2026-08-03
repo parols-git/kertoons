@@ -13,6 +13,7 @@ can poll it for progress.
 """
 import os
 import re
+import glob
 import json
 import traceback
 
@@ -242,6 +243,16 @@ def regenerate_page_image(job_dir: str, page_number: int, user_id: int, custom_p
     image_file = page.get("image_file") or f"page_{page_number}.png"
     with open(os.path.join(job_dir, image_file), "wb") as f:
         f.write(image_bytes)
+
+    # Any PDF cached on disk (see book_export.get_pdf) was built from the
+    # OLD version of this page's image, in every language and quality tier -
+    # all now stale, so every one of them is removed here rather than
+    # served again by a later download.
+    for cached_pdf in glob.glob(os.path.join(job_dir, "storybook_*.pdf")):
+        try:
+            os.remove(cached_pdf)
+        except OSError:
+            pass
 
     # Always the EXACT prompt that produced this image - whether that's the
     # user's own edited text or the default composed prompt (see

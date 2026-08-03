@@ -486,9 +486,46 @@ def _draw_quote_card(c, W, y_top, quote_text, font, accent_rgb, size=13, max_wid
 
 # -------------------------------------------------------------- exporters
 
+def pdf_filename(language: str = None, quality: str = "high") -> str:
+    """The on-disk cache filename for a given (language, quality) PDF -
+    e.g. storybook_en.pdf, storybook_en_web.pdf (low quality), or
+    storybook_hindi.pdf. Deterministic and collision-free across languages
+    (via _safe_lang_slug) and quality tiers (via the _web suffix), so it
+    doubles as both the ZIP archive name and the job-dir cache key (see
+    get_pdf())."""
+    is_english = not language or language.strip().lower() in ("en", "english", "original")
+    slug = "en" if is_english else _safe_lang_slug(language)
+    suffix = "_web" if quality == "low" else ""
+    return f"storybook_{slug}{suffix}.pdf"
+
+
+def get_pdf(job_dir: str, language: str = None, quality: str = "high") -> bytes:
+    """Returns the (language, quality) PDF, building it only if not already
+    cached on disk. Once built, a PDF is saved alongside the story's other
+    files in job_dir (see pdf_filename) and reused for every later request
+    for that same language+quality - regenerating a full storybook PDF
+    (including the per-illustration upscale/downscale pass) on every single
+    download would otherwise repeat real work for a result that never
+    changes on its own.
+
+    The cache is invalidated by pipeline.regenerate_page_image(), which
+    deletes every cached PDF for a job whenever any page's image changes -
+    a cached PDF's embedded art would otherwise silently go stale."""
+    path = os.path.join(job_dir, pdf_filename(language, quality))
+    if os.path.isfile(path):
+        with open(path, "rb") as f:
+            return f.read()
+    pdf_bytes = build_pdf(job_dir, language=language, quality=quality)
+    with open(path, "wb") as f:
+        f.write(pdf_bytes)
+    return pdf_bytes
+
+
 def build_zip(job_dir: str) -> bytes:
     """Bundles story.json, every page image, AND every language's PDF
-    storybook (English + each translation) into one ZIP."""
+    storybook (English + each translation, always "high" quality) into one
+    ZIP - reusing each PDF's cache (see get_pdf()) instead of always
+    rebuilding it fresh."""
     with open(os.path.join(job_dir, "story.json"), "r", encoding="utf-8") as f:
         story = json.load(f)
 
@@ -501,10 +538,9 @@ def build_zip(job_dir: str) -> bytes:
             if fname.lower().endswith(".png"):
                 zf.write(os.path.join(job_dir, fname), arcname=fname)
 
-        zf.writestr("storybook_en.pdf", build_pdf(job_dir, language=None))
+        zf.writestr("storybook_en.pdf", get_pdf(job_dir, language=None, quality="high"))
         for lang in story.get("languages", []):
-            safe = _safe_lang_slug(lang)
-            zf.writestr(f"storybook_{safe}.pdf", build_pdf(job_dir, language=lang))
+            zf.writestr(pdf_filename(lang, "high"), get_pdf(job_dir, language=lang, quality="high"))
     buf.seek(0)
     return buf.getvalue()
 

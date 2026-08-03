@@ -44,7 +44,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 from story_engine import config, db, auth, payments, share_page
 from story_engine.pipeline import run_job, regenerate_page_image
-from story_engine.book_export import build_zip, build_pdf
+from story_engine.book_export import build_zip, get_pdf
 from story_engine.image_client import ImageGenerationError
 
 JOBS = {}
@@ -593,8 +593,11 @@ class Handler(BaseHTTPRequestHandler):
                     suffix = "_en" if is_english else "_" + re.sub(r"[^A-Za-z0-9]+", "_", language.strip().lower())
                     if quality == "low":
                         suffix += "_web"
+                    # get_pdf() reuses a previously-built PDF straight off
+                    # disk (see book_export.py) instead of rebuilding one
+                    # that already exists for this exact language+quality.
                     self._send_bytes(
-                        build_pdf(job_dir, language=language, quality=quality),
+                        get_pdf(job_dir, language=language, quality=quality),
                         "application/pdf", f"{title}{suffix}.pdf")
                 else:
                     self._send_bytes(build_zip(job_dir), "application/zip", f"{title}.zip")
