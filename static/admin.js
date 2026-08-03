@@ -423,6 +423,35 @@ document.getElementById("settings-form").addEventListener("submit", async (ev) =
   }
 });
 
+document.getElementById("banner-upload-btn").addEventListener("click", () => {
+  const input = document.getElementById("banner-upload-input");
+  const file = input.files[0];
+  if (!file) {
+    alert("Choose an image file first.");
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = async () => {
+    try {
+      const res = await fetch("api/admin/settings/banner", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ image_base64: reader.result }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to upload image");
+      // Same filename every time (server always overwrites kertoons_bar.jpg),
+      // so a cache-busting query param is the only way to see the new file
+      // without a hard refresh.
+      document.getElementById("banner-preview").src = `static/kertoons_bar.jpg?v=${Date.now()}`;
+      input.value = "";
+      _adminShowBanner("Main banner image updated.", "success");
+    } catch (e) {
+      alert(e.message);
+    }
+  };
+  reader.readAsDataURL(file);
+});
+
 (async () => {
   const user = await renderNav();
   if (!user || user.role !== "admin") {

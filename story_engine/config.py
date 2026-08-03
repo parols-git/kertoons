@@ -102,7 +102,12 @@ if not PUBLIC_BASE_URL:
     PUBLIC_BASE_URL = f"http://{HOST}:{PORT}"
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-STATIC_DIR = os.path.join(BASE_DIR, "static")
+# Overridable so a throwaway test server (see KERTOONS_DB_PATH/
+# KERTOONS_GENERATED_DIR below) can point at an isolated copy instead of
+# ever writing into the real static/ folder - needed now that the admin
+# panel can overwrite a static file in place (the banner image upload, see
+# server.py's /api/admin/settings/banner).
+STATIC_DIR = os.environ.get("KERTOONS_STATIC_DIR", os.path.join(BASE_DIR, "static"))
 
 # Both overridable via env var so a throwaway server instance (used to
 # verify a change in a browser/tests) can point at a fully isolated

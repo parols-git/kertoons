@@ -78,6 +78,9 @@ ADD_CREDITS_AMOUNT = 20
 # image_client.generate_scene_image's custom_prompt) - capped generously
 # above what a real image prompt needs, just to stop a pathological payload.
 MAX_CUSTOM_PROMPT_LEN = 2000
+# The admin panel's main-banner upload (see /api/admin/settings/banner) -
+# generous for a marketing image, just there to stop a pathological payload.
+MAX_BANNER_UPLOAD_BYTES = 8 * 1024 * 1024
 
 
 def new_job_id():
@@ -1103,6 +1106,38 @@ class Handler(BaseHTTPRequestHandler):
                     return
                 settings = db.set_site_settings(site_name, footer_text, contact_email, contact_phone)
                 self._send_json({"ok": True, "settings": settings})
+                return
+
+            if path == "/api/admin/settings/banner":
+                if not self._require_admin():
+                    return
+                body = self._read_json_body()
+                image_b64 = body.get("image_base64") or ""
+                if not image_b64:
+                    self._send_error_json("image is required", 400)
+                    return
+                try:
+                    header, b64data = image_b64.split(",", 1) if "," in image_b64 else ("", image_b64)
+                    image_bytes = base64.b64decode(b64data)
+                except Exception:
+                    self._send_error_json("invalid image data", 400)
+                    return
+                if len(image_bytes) > MAX_BANNER_UPLOAD_BYTES:
+                    self._send_error_json(
+                        f"image is too large (max {MAX_BANNER_UPLOAD_BYTES // (1024 * 1024)} MB)", 400)
+                    return
+                try:
+                    img = Image.open(io.BytesIO(image_bytes))
+                    img = img.convert("RGB")
+                except Exception:
+                    self._send_error_json("could not read image - is it a valid image file?", 400)
+                    return
+                # Always the same filename, always overwritten - index.html's
+                # <img> tag never needs to change, regardless of what format
+                # was uploaded (re-encoded to JPEG here either way).
+                banner_path = os.path.join(config.STATIC_DIR, "kertoons_bar.jpg")
+                img.save(banner_path, format="JPEG", quality=90)
+                self._send_json({"ok": True})
                 return
 
             self.send_response(404)

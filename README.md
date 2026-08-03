@@ -197,6 +197,12 @@ trust a client-reported role). From there an admin can:
   field is blank, rather than showing an empty line/separator. A submitted
   email is only checked for a plausible shape (contains `@`) - not fully
   RFC-validated.
+- Upload a new **main banner image** (shown below the gallery on
+  `index.html`) via `POST /api/admin/settings/banner` - decoded, validated
+  as a real image (Pillow), and re-encoded as JPEG to a fixed filename,
+  `static/kertoons_bar.jpg`, **always overwritten** regardless of the
+  uploaded file's original format, so `index.html`'s `<img>` tag never
+  needs to change. Capped at 8 MB (`server.py`'s `MAX_BANNER_UPLOAD_BYTES`).
 
 ## The Storytelling Expert skill (used for every story)
 

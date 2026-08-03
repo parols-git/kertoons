@@ -589,6 +589,16 @@ button {
   font-size: 0.85rem;
 }
 
+.banner-preview {
+  display: block;
+  max-width: 320px;
+  width: 100%;
+  height: auto;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  margin-top: 4px;
+}
+
 .btn-admin-row {
   padding: 5px 12px;
   font-size: 0.75rem;
