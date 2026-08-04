@@ -223,6 +223,7 @@ async function loadReports() {
         <div class="reports-stat"><div class="reports-stat-value">$${Number(p.total_revenue_usd || 0).toFixed(2)}</div><div class="reports-stat-label">Total revenue</div></div>
         <div class="reports-stat"><div class="reports-stat-value">${p.total_credits_sold || 0}</div><div class="reports-stat-label">Credits sold</div></div>
         <div class="reports-stat"><div class="reports-stat-value">${data.images_total || 0}</div><div class="reports-stat-label">Images generated (all time)</div></div>
+        <div class="reports-stat"><div class="reports-stat-value">$${Number(data.total_cost || 0).toFixed(2)}</div><div class="reports-stat-label">Total cost (all time)</div></div>
       </div>
     `;
 
@@ -291,17 +292,27 @@ function renderImagesByMonthTable() {
 
   const isFiltered = !!(yearFilter || monthFilter);
   const filteredTotal = filtered.reduce((sum, m) => sum + m.count, 0);
+  // Per-month image cost only (count x cost-per-image) - the flat server
+  // fee is a one-time/all-time cost, not something that belongs to any
+  // single month or filtered slice, so it's shown separately in the
+  // "Total cost (all time)" stat above instead of being folded in here.
+  const filteredImageCost = filtered.reduce((sum, m) => sum + (m.image_cost || 0), 0);
   const rowsHtml = filtered.map(m => `
     <tr>
       <td>${_adminEscapeHtml(m.month)}</td>
       <td>${m.count}</td>
+      <td>$${Number(m.image_cost || 0).toFixed(2)}</td>
     </tr>`
   ).join("");
   wrap.innerHTML = `
     <table class="usage-table">
-      <thead><tr><th>Month</th><th>Images generated</th></tr></thead>
+      <thead><tr><th>Month</th><th>Images generated</th><th>Image cost</th></tr></thead>
       <tbody>${rowsHtml}</tbody>
-      <tfoot><tr><td><strong>${isFiltered ? "Total (filtered)" : "Total"}</strong></td><td><strong>${filteredTotal}</strong></td></tr></tfoot>
+      <tfoot><tr>
+        <td><strong>${isFiltered ? "Total (filtered)" : "Total"}</strong></td>
+        <td><strong>${filteredTotal}</strong></td>
+        <td><strong>$${filteredImageCost.toFixed(2)}</strong></td>
+      </tr></tfoot>
     </table>
   `;
 }

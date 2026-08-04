@@ -583,6 +583,20 @@ class Handler(BaseHTTPRequestHandler):
                     if month:
                         images_by_month[month] = images_by_month.get(month, 0) + 1
 
+                # Cost figures set on /superadmin.html (story_engine.db's
+                # cost_settings) - unlike that page, this regular-admin-
+                # facing endpoint deliberately shows the COMPUTED dollar
+                # totals (per month, and an all-time total that also folds
+                # in the flat server fee), by explicit request, even though
+                # any admin could reverse-divide a month's cost by its image
+                # count to recover the exact cost_per_image. The raw
+                # cost_per_image/server_fee inputs themselves stay editable
+                # only from /superadmin.html - this endpoint never accepts
+                # writes to them.
+                costs = db.get_cost_settings()
+                images_total = len(all_image_usage)
+                total_image_cost = images_total * costs["cost_per_image"]
+
                 self._send_json({
                     "purchases": {
                         "count": len(all_payments),
@@ -590,10 +604,14 @@ class Handler(BaseHTTPRequestHandler):
                         "total_credits_sold": total_credits_sold,
                     },
                     "coupon_usage": sorted(by_code.values(), key=lambda e: e["code"]),
-                    "images_total": len(all_image_usage),
+                    "images_total": images_total,
                     "images_by_month": [
-                        {"month": m, "count": c} for m, c in sorted(images_by_month.items())
+                        {"month": m, "count": c, "image_cost": c * costs["cost_per_image"]}
+                        for m, c in sorted(images_by_month.items())
                     ],
+                    "total_image_cost": total_image_cost,
+                    "server_fee": costs["server_fee"],
+                    "total_cost": total_image_cost + costs["server_fee"],
                 })
                 return
 

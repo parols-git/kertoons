@@ -224,7 +224,14 @@ outgrow a single screen. From there an admin can:
   via two dropdowns above the table - the year options are generated from
   whatever years actually have data, and filtering happens client-side
   against the already-fetched month list (no extra request per filter
-  change).
+  change). Also shows a **Total cost (all time)** stat and a per-month
+  **Image cost** column - computed server-side from the superadmin-only
+  `cost_per_image`/`server_fee` settings (see "Superadmin" below), by
+  explicit choice: regular admins can see these computed dollar figures
+  even though they can't see or edit the raw per-image rate itself (the
+  regular admin's own report endpoint reads `db.get_cost_settings()`
+  read-only - only `POST /api/superadmin/costs`, gated by
+  `_require_superadmin`, can change it).
 - Rebrand the whole app under **Settings**: site name and footer text
   (`db.get_site_settings`/`set_site_settings`, `POST /api/admin/settings`).
   These are served publicly on `GET /api/config` since every page needs
