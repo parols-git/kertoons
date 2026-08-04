@@ -191,16 +191,22 @@ other secret in this app.
 An admin account (`role: "admin"` on the user record) gets a "🛠 Admin" link
 in the nav bar, leading to `static/admin.html` / `admin.js`
 (`GET /api/admin/*`, gated server-side by `Handler._require_admin` - never
-trust a client-reported role). From there an admin can:
-- Create, suspend/activate, or delete any user account. Suspension blocks
-  login and every authenticated action immediately (enforced centrally in
-  `_current_user()`) but leaves the account's already-published stories
-  visible. Deleting a user leaves their stories on disk but permanently
-  hidden (no owner record - same fate as the ~30 pre-accounts legacy
-  stories), rather than deleting anything.
-- Regenerate images, publish/unpublish, or delete **any** user's story (the
-  existing owner-only checks on those three endpoints also accept
-  `role == "admin"`).
+trust a client-reported role). Users and Stories each have their own
+dedicated page (`admin-users.html`/`admin-users.js`,
+`admin-stories.html`/`admin-stories.js`, linked from admin.html's "Manage"
+section) rather than sharing space with Settings/Coupons/Footer
+links/Reports - each with real numbered pagination (page 1, 2, 3... buttons,
+not just Prev/Next) since those two tables are the ones most likely to
+outgrow a single screen. From there an admin can:
+- Create, suspend/activate, or delete any user account (`admin-users.html`).
+  Suspension blocks login and every authenticated action immediately
+  (enforced centrally in `_current_user()`) but leaves the account's
+  already-published stories visible. Deleting a user leaves their stories
+  on disk but permanently hidden (no owner record - same fate as the ~30
+  pre-accounts legacy stories), rather than deleting anything.
+- Regenerate images, publish/unpublish, or delete **any** user's story
+  (`admin-stories.html`) - the existing owner-only checks on those three
+  endpoints also accept `role == "admin"`.
 - Download a CSV of every account (`GET /api/admin/users/export`) - id,
   username, role, status, credits, created date; never password fields.
 - Create and toggle **coupon codes** (`db.create_coupon` /

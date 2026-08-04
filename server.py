@@ -328,7 +328,8 @@ class Handler(BaseHTTPRequestHandler):
                 return
 
             if path in ("/login.html", "/register.html", "/create.html", "/story.html",
-                        "/usage.html", "/faq.html", "/help.html", "/admin.html"):
+                        "/usage.html", "/faq.html", "/help.html", "/admin.html",
+                        "/admin-users.html", "/admin-stories.html"):
                 self._serve_static_file(path.lstrip("/"))
                 return
 

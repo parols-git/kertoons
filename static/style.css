@@ -440,8 +440,25 @@ button {
   font-size: 0.8rem;
 }
 .btn-page:disabled { opacity: 0.4; cursor: not-allowed; }
+.btn-page.active {
+  background: var(--accent-2);
+  color: white;
+  border-color: var(--accent-2);
+}
 
 .pagination-status { color: var(--muted); font-size: 0.85rem; }
+
+.pagination-row-numbered {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-top: 16px;
+  margin-top: 6px;
+  border-top: 1px solid var(--border);
+}
+.pagination-row-numbered .btn-page { padding: 6px 12px; }
 
 .usage-header {
   display: flex;

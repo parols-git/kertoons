@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Manage Stories - Kertoons</title>
+<link rel="stylesheet" href="static/style.css">
+</head>
+<body>
+<header>
+  <h1>🧸 Kertoons</h1>
+  <nav id="nav-bar" class="nav-bar"></nav>
+</header>
+
+<main>
+  <div id="admin-banner" class="banner"></div>
+
+  <section id="not-admin" class="card" style="display:none;">
+    <p>Admin access required.</p>
+  </section>
+
+  <section id="admin-panel" style="display:none;">
+    <p><a class="btn-outline" href="admin.html">‹ Back to admin</a></p>
+
+    <section class="card">
+      <h2>Stories</h2>
+      <p class="hint">Publish, unpublish, or delete any user's story.</p>
+      <div id="stories-table-wrap"></div>
+    </section>
+  </section>
+</main>
+
+<script src="static/nav.js"></script>
+<script src="static/admin-stories.js"></script>
+
+<footer class="site-footer">
+  <p><a href="faq.html">FAQ</a> · <a href="help.html">Help</a> ·
+  <span id="site-footer-text">kertoons.com - Another Elisda AI project</span><span id="footer-contact-email-wrap" style="display:none;"> · <a id="footer-contact-email-link" href="#"><span id="footer-contact-email"></span></a></span><span id="footer-contact-phone-wrap" style="display:none;"> · <span id="footer-contact-phone"></span></span><span id="footer-custom-links"></span></p>
+</footer>
+</body>
+</html>

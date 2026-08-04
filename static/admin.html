@@ -54,22 +54,11 @@
     </section>
 
     <section class="card">
-      <div class="usage-header">
-        <h2>Users</h2>
+      <h2>Manage</h2>
+      <div class="admin-inline-form">
+        <a class="btn-secondary" href="admin-users.html">👤 Users</a>
+        <a class="btn-secondary" href="admin-stories.html">📚 Stories</a>
       </div>
-      <form id="create-user-form" class="admin-inline-form">
-        <input type="text" id="new-user-username" placeholder="Username" required>
-        <input type="password" id="new-user-password" placeholder="Password (min 6 chars)" required>
-        <button type="submit" class="btn-secondary">Create user</button>
-      </form>
-      <div id="users-table-wrap"></div>
-      <a class="btn-outline" href="api/admin/users/export">⬇ Download all users (CSV)</a>
-    </section>
-
-    <section class="card">
-      <h2>Stories</h2>
-      <p class="hint">Publish, unpublish, or delete any user's story.</p>
-      <div id="stories-table-wrap"></div>
     </section>
 
     <section class="card">

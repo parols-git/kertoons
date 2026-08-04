@@ -1,14 +1,12 @@
-// Admin panel: users, stories, coupons, reports. Every /api/admin/* call is
+// Admin panel: settings, coupons, footer links, reports. Users and Stories
+// each moved to their own dedicated page (admin-users.html/admin-users.js,
+// admin-stories.html/admin-stories.js) with real numbered pagination - see
+// the "Manage" section below linking to both. Every /api/admin/* call is
 // re-checked server-side (see server.py's _require_admin) - the not-admin
 // message shown here is just so a non-admin isn't left staring at empty
 // tables, not the actual enforcement.
 const ADMIN_PAGE_SIZE = 6;
 
-let currentAdminId = null;
-let usersData = [];
-let usersPage = 1;
-let storiesData = [];
-let storiesPage = 1;
 let couponsData = [];
 let couponsPage = 1;
 let footerLinksData = [];
@@ -54,192 +52,6 @@ function _adminPageItems(items, page) {
   const clampedPage = Math.min(page, totalPages);
   const start = (clampedPage - 1) * ADMIN_PAGE_SIZE;
   return items.slice(start, start + ADMIN_PAGE_SIZE);
-}
-
-// --------------------------------------------------------------- users
-
-async function loadUsers() {
-  try {
-    const res = await fetch("api/admin/users");
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "Failed to load users");
-    usersData = data.users || [];
-    usersPage = 1;
-    renderUsersPage();
-  } catch (e) {
-    console.error(e);
-  }
-}
-
-function renderUsersPage() {
-  const wrap = document.getElementById("users-table-wrap");
-  if (!usersData.length) {
-    wrap.innerHTML = `<p class="hint">No users yet.</p>`;
-    return;
-  }
-  const totalPages = Math.max(1, Math.ceil(usersData.length / ADMIN_PAGE_SIZE));
-  if (usersPage > totalPages) usersPage = totalPages;
-  const pageItems = _adminPageItems(usersData, usersPage);
-
-  const rowsHtml = pageItems.map(u => `
-    <tr>
-      <td>${_adminEscapeHtml(u.username)}</td>
-      <td>${_adminEscapeHtml(u.role)}</td>
-      <td><span class="status-badge ${u.status === "active" ? "published" : "unpublished"}">${_adminEscapeHtml(u.status)}</span></td>
-      <td>${u.image_credits}</td>
-      <td class="usage-date">${_adminEscapeHtml(_adminFmtDate(u.created_at))}</td>
-      <td>
-        ${u.id === currentAdminId ? `<span class="hint">(you)</span>` : `
-        ${u.status === "active"
-          ? `<button type="button" class="btn-outline btn-admin-row" onclick="suspendUser(${u.id})">Suspend</button>`
-          : `<button type="button" class="btn-outline btn-admin-row" onclick="activateUser(${u.id})">Activate</button>`}
-        <button type="button" class="btn-outline btn-admin-row" onclick="deleteUser(${u.id})">Delete</button>
-        `}
-      </td>
-    </tr>`
-  ).join("");
-
-  wrap.innerHTML = `
-    <table class="usage-table">
-      <thead><tr><th>Username</th><th>Role</th><th>Status</th><th>Credits</th><th>Created</th><th>Actions</th></tr></thead>
-      <tbody>${rowsHtml}</tbody>
-    </table>
-    ${_adminPaginationHtml(usersData, usersPage, "changeUsersPage")}
-  `;
-}
-
-function changeUsersPage(delta) {
-  usersPage += delta;
-  renderUsersPage();
-}
-
-async function suspendUser(userId) {
-  try {
-    const res = await fetch("api/admin/users/suspend", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ user_id: userId }),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "Failed to suspend user");
-    _adminShowBanner("User suspended.", "success");
-    loadUsers();
-  } catch (e) {
-    alert(e.message);
-  }
-}
-
-async function activateUser(userId) {
-  try {
-    const res = await fetch("api/admin/users/activate", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ user_id: userId }),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "Failed to activate user");
-    _adminShowBanner("User activated.", "success");
-    loadUsers();
-  } catch (e) {
-    alert(e.message);
-  }
-}
-
-async function deleteUser(userId) {
-  if (!confirm("Delete this user account? Their stories will remain but become permanently hidden.")) return;
-  try {
-    const res = await fetch("api/admin/users/delete", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ user_id: userId }),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "Failed to delete user");
-    _adminShowBanner("User deleted.", "success");
-    loadUsers();
-    loadStories();
-  } catch (e) {
-    alert(e.message);
-  }
-}
-
-// -------------------------------------------------------------- stories
-
-async function loadStories() {
-  try {
-    const res = await fetch("api/admin/stories");
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "Failed to load stories");
-    storiesData = data.stories || [];
-    storiesPage = 1;
-    renderStoriesPage();
-  } catch (e) {
-    console.error(e);
-  }
-}
-
-function renderStoriesPage() {
-  const wrap = document.getElementById("stories-table-wrap");
-  if (!storiesData.length) {
-    wrap.innerHTML = `<p class="hint">No stories yet.</p>`;
-    return;
-  }
-  const totalPages = Math.max(1, Math.ceil(storiesData.length / ADMIN_PAGE_SIZE));
-  if (storiesPage > totalPages) storiesPage = totalPages;
-  const pageItems = _adminPageItems(storiesData, storiesPage);
-
-  const rowsHtml = pageItems.map(s => `
-    <tr>
-      <td>${s.ready ? `<a href="story.html?job_id=${s.job_id}">${_adminEscapeHtml(s.title)}</a>` : `<em>generating...</em>`}</td>
-      <td>${_adminEscapeHtml(s.owner_username || "(deleted user)")}</td>
-      <td><span class="status-badge ${s.published ? "published" : "unpublished"}">${s.published ? "published" : "unpublished"}</span></td>
-      <td class="usage-date">${_adminEscapeHtml(_adminFmtDate(s.created_at))}</td>
-      <td>
-        <button type="button" class="btn-outline btn-admin-row" onclick="toggleStoryPublish('${s.job_id}', ${!s.published})">${s.published ? "Unpublish" : "Publish"}</button>
-        <button type="button" class="btn-outline btn-admin-row" onclick="deleteStory('${s.job_id}')">Delete</button>
-      </td>
-    </tr>`
-  ).join("");
-
-  wrap.innerHTML = `
-    <table class="usage-table">
-      <thead><tr><th>Title</th><th>Owner</th><th>Status</th><th>Created</th><th>Actions</th></tr></thead>
-      <tbody>${rowsHtml}</tbody>
-    </table>
-    ${_adminPaginationHtml(storiesData, storiesPage, "changeStoriesPage")}
-  `;
-}
-
-function changeStoriesPage(delta) {
-  storiesPage += delta;
-  renderStoriesPage();
-}
-
-async function toggleStoryPublish(jobId, published) {
-  try {
-    const res = await fetch("api/story/publish", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ job_id: jobId, published }),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "Failed to update story");
-    loadStories();
-  } catch (e) {
-    alert(e.message);
-  }
-}
-
-async function deleteStory(jobId) {
-  if (!confirm("Permanently delete this story?")) return;
-  try {
-    const res = await fetch("api/story/delete", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ job_id: jobId }),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "Failed to delete story");
-    _adminShowBanner("Story deleted.", "success");
-    loadStories();
-  } catch (e) {
-    alert(e.message);
-  }
 }
 
 // -------------------------------------------------------------- coupons
@@ -462,25 +274,6 @@ async function loadReports() {
 
 // ----------------------------------------------------------------- init
 
-document.getElementById("create-user-form").addEventListener("submit", async (ev) => {
-  ev.preventDefault();
-  const username = document.getElementById("new-user-username").value.trim();
-  const password = document.getElementById("new-user-password").value;
-  try {
-    const res = await fetch("api/admin/users/create", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username, password }),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "Failed to create user");
-    document.getElementById("create-user-form").reset();
-    _adminShowBanner(`User "${username}" created.`, "success");
-    loadUsers();
-  } catch (e) {
-    alert(e.message);
-  }
-});
-
 document.getElementById("create-coupon-form").addEventListener("submit", async (ev) => {
   ev.preventDefault();
   const code = document.getElementById("new-coupon-code").value.trim();
@@ -577,11 +370,8 @@ document.getElementById("banner-upload-btn").addEventListener("click", () => {
     document.getElementById("not-admin").style.display = "block";
     return;
   }
-  currentAdminId = user.id;
   document.getElementById("admin-panel").style.display = "block";
   loadSettings();
-  loadUsers();
-  loadStories();
   loadCoupons();
   loadFooterLinks();
   loadReports();
