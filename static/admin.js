@@ -11,6 +11,7 @@ let couponsData = [];
 let couponsPage = 1;
 let footerLinksData = [];
 let footerLinksPage = 1;
+let reportsImagesByMonth = [];
 
 function _adminEscapeHtml(str) {
   if (str === undefined || str === null) return "";
@@ -247,29 +248,62 @@ async function loadReports() {
 
     // "Month" here is a plain "YYYY-MM" string (see server.py) - already in
     // chronological sort order as a string, so no date parsing is needed to
-    // display it oldest-first.
-    const monthly = data.images_by_month || [];
-    const monthlyWrap = document.getElementById("reports-images-by-month-wrap");
-    if (!monthly.length) {
-      monthlyWrap.innerHTML = `<p class="hint">No images generated yet.</p>`;
-    } else {
-      const monthRowsHtml = monthly.map(m => `
-        <tr>
-          <td>${_adminEscapeHtml(m.month)}</td>
-          <td>${m.count}</td>
-        </tr>`
-      ).join("");
-      monthlyWrap.innerHTML = `
-        <table class="usage-table">
-          <thead><tr><th>Month</th><th>Images generated</th></tr></thead>
-          <tbody>${monthRowsHtml}</tbody>
-          <tfoot><tr><td><strong>Total</strong></td><td><strong>${data.images_total || 0}</strong></td></tr></tfoot>
-        </table>
-      `;
-    }
+    // display it oldest-first. The year/month filters below operate on this
+    // same list client-side (the admin-scale data here is tiny - no need
+    // for a server round-trip per filter change).
+    reportsImagesByMonth = data.images_by_month || [];
+    _populateReportsYearFilter();
+    renderImagesByMonthTable();
   } catch (e) {
     console.error(e);
   }
+}
+
+function _populateReportsYearFilter() {
+  const select = document.getElementById("reports-year-filter");
+  const years = [...new Set(reportsImagesByMonth.map(m => m.month.slice(0, 4)))].sort();
+  const previousChoice = select.value;
+  select.innerHTML = `<option value="">All years</option>` +
+    years.map(y => `<option value="${y}">${y}</option>`).join("");
+  if (years.includes(previousChoice)) select.value = previousChoice;
+}
+
+function renderImagesByMonthTable() {
+  const wrap = document.getElementById("reports-images-by-month-wrap");
+  if (!reportsImagesByMonth.length) {
+    wrap.innerHTML = `<p class="hint">No images generated yet.</p>`;
+    return;
+  }
+
+  const yearFilter = document.getElementById("reports-year-filter").value;
+  const monthFilter = document.getElementById("reports-month-filter").value;
+  const filtered = reportsImagesByMonth.filter(m => {
+    const [year, month] = m.month.split("-");
+    if (yearFilter && year !== yearFilter) return false;
+    if (monthFilter && month !== monthFilter) return false;
+    return true;
+  });
+
+  if (!filtered.length) {
+    wrap.innerHTML = `<p class="hint">No images generated in the selected period.</p>`;
+    return;
+  }
+
+  const isFiltered = !!(yearFilter || monthFilter);
+  const filteredTotal = filtered.reduce((sum, m) => sum + m.count, 0);
+  const rowsHtml = filtered.map(m => `
+    <tr>
+      <td>${_adminEscapeHtml(m.month)}</td>
+      <td>${m.count}</td>
+    </tr>`
+  ).join("");
+  wrap.innerHTML = `
+    <table class="usage-table">
+      <thead><tr><th>Month</th><th>Images generated</th></tr></thead>
+      <tbody>${rowsHtml}</tbody>
+      <tfoot><tr><td><strong>${isFiltered ? "Total (filtered)" : "Total"}</strong></td><td><strong>${filteredTotal}</strong></td></tr></tfoot>
+    </table>
+  `;
 }
 
 // ----------------------------------------------------------------- init
@@ -363,6 +397,9 @@ document.getElementById("banner-upload-btn").addEventListener("click", () => {
   };
   reader.readAsDataURL(file);
 });
+
+document.getElementById("reports-year-filter").addEventListener("change", renderImagesByMonthTable);
+document.getElementById("reports-month-filter").addEventListener("change", renderImagesByMonthTable);
 
 (async () => {
   const user = await renderNav();

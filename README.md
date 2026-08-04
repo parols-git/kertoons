@@ -220,7 +220,11 @@ outgrow a single screen. From there an admin can:
   a per-coupon redemption count, and a total-images-generated stat with a
   per-calendar-month breakdown (grouped from `db.list_all_image_usage()`'s
   `created_at` timestamps - every initial-page AND "Regenerate image"
-  generation counts, oldest month first).
+  generation counts, oldest month first), filterable by year and/or month
+  via two dropdowns above the table - the year options are generated from
+  whatever years actually have data, and filtering happens client-side
+  against the already-fetched month list (no extra request per filter
+  change).
 - Rebrand the whole app under **Settings**: site name and footer text
   (`db.get_site_settings`/`set_site_settings`, `POST /api/admin/settings`).
   These are served publicly on `GET /api/config` since every page needs
