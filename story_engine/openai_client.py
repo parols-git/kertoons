@@ -17,7 +17,7 @@ import base64
 from . import config
 from .api_utils import StoryGenerationError, post_with_retry
 from .prompts import (
-    SYSTEM_PROMPT, build_user_prompt, VISION_SYSTEM_PROMPT,
+    build_system_prompt, build_user_prompt, VISION_SYSTEM_PROMPT,
     TRANSLATE_SYSTEM_PROMPT, build_translate_user_prompt,
 )
 
@@ -47,31 +47,33 @@ def _chat(messages, model=None, timeout=60):
 
 # --------------------------------------------------------------------- story
 
-def generate_story(initial_text: str, region: str) -> dict:
+def generate_story(initial_text: str, region: str, page_count: int = None) -> dict:
+    page_count = page_count or config.DEFAULT_PAGE_COUNT
     if config.MOCK_STORY:
-        return _mock_story(initial_text, region)
+        return _mock_story(initial_text, region, page_count)
 
     messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": build_user_prompt(initial_text, region)},
+        {"role": "system", "content": build_system_prompt(page_count)},
+        {"role": "user", "content": build_user_prompt(initial_text, region, page_count)},
     ]
     story = _chat(messages)
-    _validate_story_shape(story)
+    _validate_story_shape(story, page_count)
     return story
 
 
-def _validate_story_shape(story: dict):
+def _validate_story_shape(story: dict, page_count: int):
     required = ("title", "region", "moral", "characters", "pages")
     for key in required:
         if key not in story:
             raise StoryGenerationError(f"Model response missing required field '{key}'")
-    if len(story["pages"]) != config.PAGE_COUNT:
+    if len(story["pages"]) != page_count:
         raise StoryGenerationError(
-            f"Expected {config.PAGE_COUNT} pages, got {len(story['pages'])}"
+            f"Expected {page_count} pages, got {len(story['pages'])}"
         )
 
 
-def _mock_story(initial_text: str, region: str) -> dict:
+def _mock_story(initial_text: str, region: str, page_count: int = None) -> dict:
+    page_count = page_count or config.DEFAULT_PAGE_COUNT
     region = region or "a cozy village by a hill"
     seed = (initial_text or "a small adventure").strip().rstrip(".")
     characters = [
@@ -164,8 +166,30 @@ def _mock_story(initial_text: str, region: str) -> dict:
         ),
     ]
 
+    # The mock's hand-written narrative arc has exactly 5 fixed beats, but
+    # page_count is admin-configurable - always keep the setup (first) and
+    # resolution (last) beats, and stretch or shrink the middle to fit
+    # whatever count was asked for: sample evenly if fewer are needed, cycle
+    # through if more are needed. Real generation doesn't have this
+    # constraint (the model writes a fresh arc for any page_count), so this
+    # only matters for MOCK_STORY mode.
+    if page_count == len(beats):
+        selected_beats = beats
+    elif page_count <= 1:
+        selected_beats = beats[:1]
+    else:
+        first, last, middle = beats[0], beats[-1], beats[1:-1]
+        need = page_count - 2
+        if need <= 0:
+            selected_beats = [first, last][:page_count]
+        elif page_count < len(beats):
+            step = len(middle) / need
+            selected_beats = [first] + [middle[int(i * step)] for i in range(need)] + [last]
+        else:
+            selected_beats = [first] + [middle[i % len(middle)] for i in range(need)] + [last]
+
     pages = []
-    for i, (summary, present, text, spot_and_style) in enumerate(beats, start=1):
+    for i, (summary, present, text, spot_and_style) in enumerate(selected_beats, start=1):
         char_block = block_for(present)
         pages.append({
             "page_number": i,

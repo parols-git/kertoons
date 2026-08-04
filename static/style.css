@@ -601,6 +601,13 @@ button {
   border-radius: 8px;
   font-size: 0.85rem;
 }
+.admin-inline-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.85rem;
+  color: var(--text-muted, #666);
+}
 
 .banner-preview {
   display: block;

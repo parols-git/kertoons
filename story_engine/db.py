@@ -38,6 +38,12 @@ DEFAULT_FOOTER_TEXT = "kertoons.com - Another Elisda AI project"
 # appears anywhere until an admin actually sets one (see faq.html).
 DEFAULT_CONTACT_EMAIL = ""
 DEFAULT_CONTACT_PHONE = ""
+# Bounds for the admin-configurable "scenes per story" setting - loose
+# enough to be useful, tight enough that a typo doesn't accidentally start
+# a 500-page generation run (each page costs 1 image credit and one image
+# API call, and the story-writing model must return exactly this many).
+MIN_PAGE_COUNT = 2
+MAX_PAGE_COUNT = 10
 
 _SKELETON = {
     "next_user_id": 1,
@@ -53,6 +59,7 @@ _SKELETON = {
         "footer_text": DEFAULT_FOOTER_TEXT,
         "contact_email": DEFAULT_CONTACT_EMAIL,
         "contact_phone": DEFAULT_CONTACT_PHONE,
+        "page_count": config.DEFAULT_PAGE_COUNT,
     },
 }
 
@@ -559,9 +566,10 @@ def list_coupon_redemptions() -> list:
 
 def get_site_settings() -> dict:
     """Admin-configurable branding - site display name, the trailing footer
-    message, and optional contact info, all shown on every page. Falls back
-    to the defaults for data files saved before this feature existed (or
-    before contact_email/contact_phone specifically were added)."""
+    message, optional contact info, and how many scenes/pages each new story
+    gets, all shown on every page (or used at generation time). Falls back
+    to the defaults for data files saved before a given field existed (e.g.
+    contact_email/contact_phone, and later page_count)."""
     with _LOCK:
         data = _load()
     settings = data.get("site_settings") or {}
@@ -570,18 +578,22 @@ def get_site_settings() -> dict:
         "footer_text": settings.get("footer_text") or DEFAULT_FOOTER_TEXT,
         "contact_email": settings.get("contact_email") or DEFAULT_CONTACT_EMAIL,
         "contact_phone": settings.get("contact_phone") or DEFAULT_CONTACT_PHONE,
+        "page_count": settings.get("page_count") or config.DEFAULT_PAGE_COUNT,
     }
 
 
-def set_site_settings(site_name: str, footer_text: str,
-                       contact_email: str = "", contact_phone: str = "") -> dict:
+def set_site_settings(site_name: str, footer_text: str, contact_email: str = "",
+                       contact_phone: str = "", page_count: int = None) -> dict:
     with _LOCK:
         data = _load()
+        existing = data.get("site_settings") or {}
         data["site_settings"] = {
             "site_name": site_name,
             "footer_text": footer_text,
             "contact_email": contact_email,
             "contact_phone": contact_phone,
+            "page_count": page_count if page_count is not None
+            else (existing.get("page_count") or config.DEFAULT_PAGE_COUNT),
         }
         _save(data)
         return dict(data["site_settings"])

@@ -369,7 +369,7 @@ class Handler(BaseHTTPRequestHandler):
                     "translation_provider": config.TRANSLATION_PROVIDER,
                     "mock_images": bool(config.MOCK_IMAGES),
                     "mock_payments": bool(config.MOCK_PAYMENTS),
-                    "page_count": config.PAGE_COUNT,
+                    "page_count": site_settings["page_count"],
                     "credit_pack_credits": payments.CREDIT_PACK_CREDITS,
                     "credit_pack_price_usd": payments.CREDIT_PACK_PRICE_USD_CENTS / 100,
                     "site_name": site_settings["site_name"],
@@ -1126,7 +1126,20 @@ class Handler(BaseHTTPRequestHandler):
                 if contact_email and "@" not in contact_email:
                     self._send_error_json("contact email doesn't look valid", 400)
                     return
-                settings = db.set_site_settings(site_name, footer_text, contact_email, contact_phone)
+
+                page_count_raw = body.get("page_count")
+                try:
+                    page_count = int(page_count_raw)
+                except (TypeError, ValueError):
+                    self._send_error_json("scenes per story must be a whole number", 400)
+                    return
+                if not (db.MIN_PAGE_COUNT <= page_count <= db.MAX_PAGE_COUNT):
+                    self._send_error_json(
+                        f"scenes per story must be between {db.MIN_PAGE_COUNT} and {db.MAX_PAGE_COUNT}", 400)
+                    return
+
+                settings = db.set_site_settings(
+                    site_name, footer_text, contact_email, contact_phone, page_count=page_count)
                 self._send_json({"ok": True, "settings": settings})
                 return
 

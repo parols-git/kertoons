@@ -70,7 +70,11 @@ def run_job(job: dict, job_dir: str):
             initial_text = (
                 f"{initial_text}\n\n(Inspiration for one character's look: {character_hint})"
             )
-        story = openai_client.generate_story(initial_text, job.get("region", ""))
+        # Read fresh at generation time (not cached at import/job-creation
+        # time) so an admin's change to "scenes per story" in /admin.html
+        # takes effect on the very next story, without a server restart.
+        page_count = db.get_site_settings().get("page_count") or config.DEFAULT_PAGE_COUNT
+        story = openai_client.generate_story(initial_text, job.get("region", ""), page_count=page_count)
         job["progress"] = 40
 
         secondary_language = job.get("secondary_language", "").strip()

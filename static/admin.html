@@ -22,12 +22,15 @@
   <section id="admin-panel" style="display:none;">
     <section class="card">
       <h2>Settings</h2>
-      <p class="hint">Site name, footer text, and contact info shown on every page.</p>
+      <p class="hint">Site name, footer text, contact info, and scenes per story (applies to every new story created after saving - existing stories keep however many pages they were made with).</p>
       <form id="settings-form" class="admin-inline-form">
         <input type="text" id="settings-site-name" placeholder="Site name" required>
         <input type="text" id="settings-footer-text" placeholder="Footer text" style="flex:1; min-width:220px;">
         <input type="email" id="settings-contact-email" placeholder="Contact email (optional)">
         <input type="tel" id="settings-contact-phone" placeholder="Contact phone (optional)">
+        <label class="admin-inline-label">Scenes per story
+          <input type="number" id="settings-page-count" min="2" max="10" step="1" style="width:70px;" required>
+        </label>
         <button type="submit" class="btn-secondary">Save settings</button>
       </form>
 

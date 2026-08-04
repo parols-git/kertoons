@@ -243,6 +243,15 @@ trust a client-reported role). From there an admin can:
   `static/kertoons_bar.jpg`, **always overwritten** regardless of the
   uploaded file's original format, so `index.html`'s `<img>` tag never
   needs to change. Capped at 8 MB (`server.py`'s `MAX_BANNER_UPLOAD_BYTES`).
+- Change **scenes per story** (default 5, range 2-10 -
+  `db.MIN_PAGE_COUNT`/`MAX_PAGE_COUNT`) - every hardcoded "5 pages" mention
+  in `story_engine/prompts.py`'s story-generation instructions is actually a
+  `<<PAGE_COUNT>>` placeholder, substituted by `build_system_prompt()` at
+  generation time, so the model is always told the number currently saved
+  here. Read fresh from `site_settings` at the start of every generation job
+  (`pipeline.run_job`), not cached - takes effect on the very next story
+  created, no restart needed. Stories already generated keep whatever page
+  count they were made with; this only changes new ones.
 
 ## The Storytelling Expert skill (used for every story)
 
@@ -398,7 +407,7 @@ change - everything else (pipeline, UI, export) is provider-agnostic.
 |---|---|
 | Web form: 2-3 sentence idea, region, secondary language | `static/create.html` / `create.js` (login required - see "Accounts, ownership, and publishing" above) |
 | Story text via OpenAI only | `story_engine/openai_client.py` (`generate_story`) - translation is the one deviation, see below |
-| 5 pages, 5 images, 5 text sections | `story_engine/prompts.py` (`PAGE_COUNT = 5` enforced) |
+| 5 pages, 5 images, 5 text sections (default; admin-configurable) | `story_engine/prompts.py` (`build_system_prompt(page_count)`) - see "Scenes per story" below |
 | Images via "Deepak.org"(/DeepAI) only | `story_engine/image_client.py` |
 | Region influences visuals/culture/language | Baked into `SYSTEM_PROMPT` + `build_user_prompt` |
 | Character consistency (name/look/personality fixed) | See "Character consistency strategy" below |

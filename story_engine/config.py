@@ -93,7 +93,10 @@ MOCK_IMAGES = FORCE_MOCK or not DEEPAI_API_KEY
 # "buying" credits) is testable with zero paid services configured.
 MOCK_PAYMENTS = FORCE_MOCK or not (STRIPE_PAYMENT_LINK or STRIPE_SECRET_KEY)
 
-PAGE_COUNT = 5
+# Fallback only - the actual page count used for generation is admin-
+# configurable at runtime (story_engine/db.py's site_settings, editable from
+# /admin.html) and this default is used only until an admin ever changes it.
+DEFAULT_PAGE_COUNT = 5
 
 HOST = os.environ.get("HOST", "127.0.0.1")
 PORT = int(os.environ.get("PORT", "8765"))
