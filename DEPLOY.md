@@ -131,6 +131,12 @@ auto-created on first start (see the "Admin panel" section of README.md) -
 otherwise `/admin.html` stays permanently inaccessible (no account will ever
 have `role: "admin"`).
 
+Optionally also set `SUPERADMIN_USERNAME`/`SUPERADMIN_PASSWORD` (use a
+**different** username than `ADMIN_USERNAME`) for the separate cost-settings
+dashboard at `/superadmin.html` - see the "Superadmin" section of
+README.md. Not linked from anywhere in the app; reach it by typing the URL
+directly.
+
 ## 7. Run it as a persistent service (systemd)
 
 The repo includes a ready-made unit file at `deploy/kertoons.service`:

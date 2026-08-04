@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex, nofollow">
+<title>Superadmin</title>
+<link rel="stylesheet" href="static/style.css">
+</head>
+<body>
+<main class="narrow">
+  <div id="error-box"></div>
+
+  <section class="card auth-card" id="login-section">
+    <h2>Superadmin</h2>
+    <form id="superadmin-login-form">
+      <label for="username">Username</label>
+      <input type="text" id="username" required autocomplete="username">
+
+      <label for="password">Password</label>
+      <input type="password" id="password" required autocomplete="current-password">
+
+      <label for="captcha-input">Enter the code shown</label>
+      <div class="captcha-row">
+        <img id="captcha-img" alt="Captcha code" width="140" height="50">
+        <button type="button" class="btn-outline" id="captcha-refresh" title="Get a new code">🔄</button>
+        <input type="text" id="captcha-input" inputmode="numeric" pattern="[0-9]*" maxlength="4"
+               autocomplete="off" placeholder="0000" required>
+      </div>
+
+      <button type="submit" class="btn-primary" id="submit-btn">Log in</button>
+    </form>
+  </section>
+
+  <section class="card" id="dashboard-section" style="display:none;">
+    <h2>Cost settings</h2>
+    <p class="hint">Only visible here - not shown anywhere else in the app, including the regular admin panel.</p>
+    <form id="costs-form" class="admin-inline-form">
+      <label class="admin-inline-label">Cost per image ($)
+        <input type="number" id="cost-per-image" min="0" step="0.0001" style="width:110px;" required>
+      </label>
+      <label class="admin-inline-label">Server / hosting fee ($)
+        <input type="number" id="server-fee" min="0" step="0.01" style="width:110px;" required>
+      </label>
+      <button type="submit" class="btn-secondary">Save</button>
+    </form>
+    <div id="cost-summary"></div>
+    <p><button type="button" class="btn-outline" id="logout-btn">Log out</button></p>
+  </section>
+</main>
+
+<script src="static/superadmin.js"></script>
+</body>
+</html>

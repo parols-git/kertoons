@@ -288,6 +288,45 @@ outgrow a single screen. From there an admin can:
   discouraged, since the URL becomes a real `href` rendered for every site
   visitor, not just the admin who entered it.
 
+## Superadmin: running-cost dashboard
+
+A separate, more-privileged role sits above "admin" - set both
+`SUPERADMIN_USERNAME`/`SUPERADMIN_PASSWORD` (`.env`) to auto-provision it on
+startup, same convention as `ADMIN_USERNAME`/`ADMIN_PASSWORD`
+(`db.create_superadmin_if_missing`) but use a **different** username than
+the regular admin one - they're intentionally separate accounts.
+
+Reach it at `/superadmin.html` - a standalone page with its own login form
+(captcha included), **not linked from anywhere else in the app** (no nav
+link, no link from `/admin.html`). The real protection is server-side role
+gating (`server.py`'s `_require_superadmin`, checking `role == "superadmin"`
+exactly), not the URL being obscure - logging in here with valid regular-
+admin (or any other role's) credentials succeeds the login itself but is
+then immediately rejected and logged back out, showing a generic "Access
+denied." (see `static/superadmin.js`).
+
+Shows and lets you edit two figures, stored in `story_engine/db.py`'s
+`cost_settings` - **deliberately a separate top-level dict from
+`site_settings`**, since `site_settings` is served to every visitor via the
+public `GET /api/config` and these numbers must never be reachable that
+way:
+- **Cost per image** ($, e.g. what DeepAI actually charges per call)
+- **Server / hosting fee** ($, a flat figure you set)
+
+`GET /api/superadmin/costs` combines these with the same all-time image
+count used by the regular admin Reports page
+(`db.list_all_image_usage()`) to compute **total cost** = (images generated
+× cost per image) + server fee, recomputed fresh on every load and after
+every save - never cached or stale.
+
+A regular admin (`role == "admin"`) is a strict subset of superadmin
+capability, not a separate track - `_is_admin_role()`
+(`server.py`/duplicated client-side per page, matching this app's per-page-
+independence convention) treats `role in ("admin", "superadmin")` as
+"admin-panel access", so a superadmin can still do everything a regular
+admin can (`/admin.html`, `/admin-users.html`, `/admin-stories.html`) in
+addition to the cost dashboard a regular admin cannot see.
+
 ## The Storytelling Expert skill (used for every story)
 
 The form only ever collects a 1-2 sentence seed idea. Left alone, a model tends

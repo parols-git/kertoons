@@ -87,6 +87,15 @@ def new_job_id():
     return uuid.uuid4().hex[:12]
 
 
+def _is_admin_role(role: str) -> bool:
+    """"superadmin" is a strict superset of "admin" - a superadmin can do
+    everything a regular admin can, plus reach the cost-settings dashboard
+    (see _require_superadmin) that even regular admins cannot. Used for
+    every check that historically compared role == "admin" directly, so a
+    superadmin account never loses ordinary admin-panel access."""
+    return role in ("admin", "superadmin")
+
+
 # --------------------------------------------------------------- captcha
 #
 # A simple 4-digit numeric captcha on the login form, meant to slow down
@@ -279,13 +288,24 @@ class Handler(BaseHTTPRequestHandler):
         return user
 
     def _require_admin(self):
-        """Returns the current user if they're an admin, otherwise sends a
-        403 and returns None. Every /api/admin/* handler must call this
-        first - the client-reported role is never trusted, only what's
-        actually stored server-side."""
+        """Returns the current user if they're an admin (or superadmin - see
+        _is_admin_role), otherwise sends a 403 and returns None. Every
+        /api/admin/* handler must call this first - the client-reported role
+        is never trusted, only what's actually stored server-side."""
         user = self._current_user()
-        if not user or user.get("role") != "admin":
+        if not user or not _is_admin_role(user.get("role")):
             self._send_error_json("admin access required", 403)
+            return None
+        return user
+
+    def _require_superadmin(self):
+        """Stricter than _require_admin - only role == "superadmin" passes,
+        a regular admin does not. Gates /api/superadmin/* (cost-per-image,
+        server fee, computed totals) - nothing else in the app is allowed to
+        read or write story_engine.db's cost_settings."""
+        user = self._current_user()
+        if not user or user.get("role") != "superadmin":
+            self._send_error_json("access denied", 403)
             return None
         return user
 
@@ -331,6 +351,16 @@ class Handler(BaseHTTPRequestHandler):
                         "/usage.html", "/faq.html", "/help.html", "/admin.html",
                         "/admin-users.html", "/admin-stories.html"):
                 self._serve_static_file(path.lstrip("/"))
+                return
+
+            # Deliberately not in the list above (which is fine to route
+            # normally - none of those pages are secret, just login-gated) -
+            # /superadmin.html is never linked from any nav/page in this app,
+            # so it's routed on its own here as a reminder that it's meant
+            # to stay unlisted. The real protection is server-side role
+            # gating (_require_superadmin), not the URL being obscure.
+            if path == "/superadmin.html":
+                self._serve_static_file("superadmin.html")
                 return
 
             if path == "/share.html":
@@ -501,6 +531,21 @@ class Handler(BaseHTTPRequestHandler):
                     return
                 coupons = sorted(db.list_coupons(), key=lambda c: c["created_at"], reverse=True)
                 self._send_json({"coupons": coupons})
+                return
+
+            if path == "/api/superadmin/costs":
+                if not self._require_superadmin():
+                    return
+                costs = db.get_cost_settings()
+                images_total = len(db.list_all_image_usage())
+                image_cost_total = images_total * costs["cost_per_image"]
+                self._send_json({
+                    "cost_per_image": costs["cost_per_image"],
+                    "server_fee": costs["server_fee"],
+                    "images_total": images_total,
+                    "image_cost_total": image_cost_total,
+                    "total_cost": image_cost_total + costs["server_fee"],
+                })
                 return
 
             if path == "/api/admin/footer_links":
@@ -929,13 +974,13 @@ class Handler(BaseHTTPRequestHandler):
                 if owner_id is None:
                     self._send_error_json("unknown job_id", 404)
                     return
-                if owner_id != user["id"] and user["role"] != "admin":
+                if owner_id != user["id"] and not _is_admin_role(user["role"]):
                     self._send_error_json("you don't own this story", 403)
                     return
 
                 # Admins moderating someone else's story aren't gated on
                 # their own credit balance - only the story's own owner is.
-                if user["role"] != "admin":
+                if not _is_admin_role(user["role"]):
                     credits = db.get_image_credits(user["id"])
                     if credits < MIN_CREDITS_TO_GENERATE:
                         self._send_error_json(
@@ -982,7 +1027,7 @@ class Handler(BaseHTTPRequestHandler):
                 if owner_id is None:
                     self._send_error_json("unknown job_id", 404)
                     return
-                if owner_id != user["id"] and user["role"] != "admin":
+                if owner_id != user["id"] and not _is_admin_role(user["role"]):
                     self._send_error_json("you don't own this story", 403)
                     return
 
@@ -1007,7 +1052,7 @@ class Handler(BaseHTTPRequestHandler):
                 if owner_id is None:
                     self._send_error_json("unknown job_id", 404)
                     return
-                if owner_id != user["id"] and user["role"] != "admin":
+                if owner_id != user["id"] and not _is_admin_role(user["role"]):
                     self._send_error_json("you don't own this story", 403)
                     return
 
@@ -1218,6 +1263,32 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json({"ok": True})
                 return
 
+            if path == "/api/superadmin/costs":
+                if not self._require_superadmin():
+                    return
+                body = self._read_json_body()
+                try:
+                    cost_per_image = float(body.get("cost_per_image"))
+                    server_fee = float(body.get("server_fee"))
+                except (TypeError, ValueError):
+                    self._send_error_json("cost per image and server fee must be numbers", 400)
+                    return
+                if cost_per_image < 0 or server_fee < 0:
+                    self._send_error_json("cost per image and server fee can't be negative", 400)
+                    return
+                db.set_cost_settings(cost_per_image, server_fee)
+                images_total = len(db.list_all_image_usage())
+                image_cost_total = images_total * cost_per_image
+                self._send_json({
+                    "ok": True,
+                    "cost_per_image": cost_per_image,
+                    "server_fee": server_fee,
+                    "images_total": images_total,
+                    "image_cost_total": image_cost_total,
+                    "total_cost": image_cost_total + server_fee,
+                })
+                return
+
             if path == "/api/admin/footer_links/create":
                 if not self._require_admin():
                     return
@@ -1275,6 +1346,16 @@ def main():
             print(
                 f"Existing account '{config.ADMIN_USERNAME}' promoted to admin "
                 f"(its existing password was kept, NOT ADMIN_PASSWORD)."
+            )
+    if config.SUPERADMIN_USERNAME and config.SUPERADMIN_PASSWORD:
+        salt, digest = auth.hash_password(config.SUPERADMIN_PASSWORD)
+        result = db.create_superadmin_if_missing(config.SUPERADMIN_USERNAME, salt, digest)
+        if result == "created":
+            print(f"Superadmin account '{config.SUPERADMIN_USERNAME}' created.")
+        elif result == "promoted":
+            print(
+                f"Existing account '{config.SUPERADMIN_USERNAME}' promoted to superadmin "
+                f"(its existing password was kept, NOT SUPERADMIN_PASSWORD)."
             )
     server = ThreadingHTTPServer((config.HOST, config.PORT), Handler)
     mode = []

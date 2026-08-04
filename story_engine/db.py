@@ -70,6 +70,15 @@ _SKELETON = {
         "page_count": config.DEFAULT_PAGE_COUNT,
         "signup_credits": DEFAULT_IMAGE_CREDITS,
     },
+    # Deliberately separate from site_settings above - site_settings is
+    # served to EVERY visitor via the public GET /api/config (site name,
+    # footer text, etc.), but running-cost figures must never be reachable
+    # by anyone except role="superadmin" (see server.py's
+    # _require_superadmin). Never add this dict's keys to get_site_settings().
+    "cost_settings": {
+        "cost_per_image": 0.0,
+        "server_fee": 0.0,
+    },
 }
 
 
@@ -171,7 +180,10 @@ def create_admin_if_missing(username: str, password_salt: str, password_hash: st
         data = _load()
         existing = next((u for u in data["users"] if u["username"].lower() == username.lower()), None)
         if existing is not None:
-            if existing.get("role") == "admin":
+            if existing.get("role") in ("admin", "superadmin"):
+                # Already admin-or-better - in particular, never downgrade an
+                # existing superadmin to plain admin just because their
+                # username happens to also be configured as ADMIN_USERNAME.
                 return "unchanged"
             existing["role"] = "admin"
             _save(data)
@@ -185,6 +197,38 @@ def create_admin_if_missing(username: str, password_salt: str, password_hash: st
             "created_at": _now(),
             "image_credits": signup_credits,
             "role": "admin",
+            "status": "active",
+        })
+        data["next_user_id"] += 1
+        _save(data)
+        return "created"
+
+
+def create_superadmin_if_missing(username: str, password_salt: str, password_hash: str) -> str:
+    """Same bootstrap pattern as create_admin_if_missing() above, for the
+    separate, more-privileged "superadmin" role - see config.py's
+    SUPERADMIN_USERNAME/SUPERADMIN_PASSWORD. Deliberately a distinct account
+    from the regular admin bootstrap one (different username expected), so
+    a leaked/guessed admin password alone can never reach the cost-settings
+    dashboard. Returns "created", "promoted", or "unchanged"."""
+    with _LOCK:
+        data = _load()
+        existing = next((u for u in data["users"] if u["username"].lower() == username.lower()), None)
+        if existing is not None:
+            if existing.get("role") == "superadmin":
+                return "unchanged"
+            existing["role"] = "superadmin"
+            _save(data)
+            return "promoted"
+        signup_credits = (data.get("site_settings") or {}).get("signup_credits", DEFAULT_IMAGE_CREDITS)
+        data["users"].append({
+            "id": data["next_user_id"],
+            "username": username,
+            "password_salt": password_salt,
+            "password_hash": password_hash,
+            "created_at": _now(),
+            "image_credits": signup_credits,
+            "role": "superadmin",
             "status": "active",
         })
         data["next_user_id"] += 1
@@ -673,3 +717,33 @@ def set_site_settings(site_name: str, footer_text: str, contact_email: str = "",
         }
         _save(data)
         return dict(data["site_settings"])
+
+
+# ------------------------------------------------------------ cost settings
+#
+# superadmin-only (see server.py's _require_superadmin) - the per-image
+# generation cost and a flat server/hosting fee, used to compute a running
+# total cost figure on /superadmin.html. Kept in a completely separate top-
+# level dict from site_settings on purpose: site_settings is served to every
+# visitor via the public GET /api/config, and these numbers must never be
+# reachable that way.
+
+def get_cost_settings() -> dict:
+    with _LOCK:
+        data = _load()
+    settings = data.get("cost_settings") or {}
+    return {
+        "cost_per_image": settings.get("cost_per_image", 0.0),
+        "server_fee": settings.get("server_fee", 0.0),
+    }
+
+
+def set_cost_settings(cost_per_image: float, server_fee: float) -> dict:
+    with _LOCK:
+        data = _load()
+        data["cost_settings"] = {
+            "cost_per_image": cost_per_image,
+            "server_fee": server_fee,
+        }
+        _save(data)
+        return dict(data["cost_settings"])

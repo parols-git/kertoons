@@ -123,7 +123,7 @@ async function renderNav() {
       <a href="create.html">Create a story</a>
       <a href="usage.html">🖼️ ${user.image_credits} image credits</a>
       <button type="button" class="btn-outline btn-nav" id="add-credits-btn">${addCreditsLabel}</button>
-      ${user.role === "admin" ? `<a href="admin.html">🛠 Admin</a>` : ""}
+      ${(user.role === "admin" || user.role === "superadmin") ? `<a href="admin.html">🛠 Admin</a>` : ""}
       <span class="nav-user">Hi, ${_navEscapeHtml(user.username)}</span>
       <button type="button" class="btn-outline btn-nav" id="logout-btn">Log out</button>
     `;

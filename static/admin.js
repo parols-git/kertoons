@@ -401,9 +401,17 @@ document.getElementById("banner-upload-btn").addEventListener("click", () => {
 document.getElementById("reports-year-filter").addEventListener("change", renderImagesByMonthTable);
 document.getElementById("reports-month-filter").addEventListener("change", renderImagesByMonthTable);
 
+// "superadmin" is a strict superset of "admin" (see server.py's
+// _is_admin_role) - a superadmin sees this panel too, plus the separate
+// cost-settings dashboard at /superadmin.html that regular admins can't
+// reach.
+function _isAdminRole(role) {
+  return role === "admin" || role === "superadmin";
+}
+
 (async () => {
   const user = await renderNav();
-  if (!user || user.role !== "admin") {
+  if (!user || !_isAdminRole(user.role)) {
     document.getElementById("not-admin").style.display = "block";
     return;
   }

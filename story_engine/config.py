@@ -130,4 +130,14 @@ DB_PATH = os.environ.get("KERTOONS_DB_PATH", os.path.join(BASE_DIR, "kertoons_da
 ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME", "").strip()
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "").strip()
 
+# A separate, more-privileged tier above "admin" - can see/edit the
+# per-image and server cost figures (see db.get_cost_settings) that no
+# other role, including regular admins, can access. Same bootstrap
+# convention as ADMIN_USERNAME/ADMIN_PASSWORD - auto-provisioned on startup,
+# blank disables it, never typed anywhere else. Deliberately a DIFFERENT
+# account from the regular admin one (see db.create_superadmin_if_missing) -
+# logging into /superadmin.html with regular admin credentials must fail.
+SUPERADMIN_USERNAME = os.environ.get("SUPERADMIN_USERNAME", "").strip()
+SUPERADMIN_PASSWORD = os.environ.get("SUPERADMIN_PASSWORD", "").strip()
+
 os.makedirs(GENERATED_DIR, exist_ok=True)
