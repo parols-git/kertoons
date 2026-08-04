@@ -82,6 +82,19 @@ function _applyContactInfo(email, phone) {
   }
 }
 
+// Admin-added extra footer links (e.g. "Terms", "Privacy Policy") - shown
+// after FAQ/Help on every page via the #footer-custom-links span, same
+// public-config-driven pattern as _applyFooterText/_applyContactInfo (no
+// login required to see them, since the whole footer is site-wide chrome).
+function _applyFooterLinks(links) {
+  const wrap = document.getElementById("footer-custom-links");
+  if (!wrap || !links || !links.length) return;
+  wrap.innerHTML = links.map(l => {
+    const attrs = l.new_tab ? ' target="_blank" rel="noopener"' : "";
+    return ` · <a href="${_navEscapeHtml(l.url)}"${attrs}>${_navEscapeHtml(l.name)}</a>`;
+  }).join("");
+}
+
 async function renderNav() {
   let user = null;
   let cfg = {};
@@ -96,6 +109,7 @@ async function renderNav() {
   _applyBranding(cfg.site_name);
   _applyFooterText(cfg.footer_text);
   _applyContactInfo(cfg.contact_email, cfg.contact_phone);
+  _applyFooterLinks(cfg.footer_links);
 
   const nav = document.getElementById("nav-bar");
   if (!nav) return user;

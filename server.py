@@ -376,6 +376,8 @@ class Handler(BaseHTTPRequestHandler):
                     "footer_text": site_settings["footer_text"],
                     "contact_email": site_settings["contact_email"],
                     "contact_phone": site_settings["contact_phone"],
+                    "footer_links": db.list_footer_links(),
+                    "signup_credits": site_settings["signup_credits"],
                 })
                 return
 
@@ -500,6 +502,15 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json({"coupons": coupons})
                 return
 
+            if path == "/api/admin/footer_links":
+                if not self._require_admin():
+                    return
+                # Oldest-first (creation order) - matches the order they're
+                # actually rendered in the footer (see nav.js), unlike the
+                # other admin tables above which sort newest-first.
+                self._send_json({"footer_links": db.list_footer_links()})
+                return
+
             if path == "/api/admin/reports/summary":
                 if not self._require_admin():
                     return
@@ -512,6 +523,20 @@ class Handler(BaseHTTPRequestHandler):
                     entry = by_code.setdefault(r["code"], {"code": r["code"], "count": 0, "credits_granted": 0})
                     entry["count"] += 1
                     entry["credits_granted"] += r.get("credits") or 0
+
+                # One row per calendar month (initial-page generations AND
+                # "Regenerate image" clicks both count - every one of them
+                # spends a credit and calls the image API, see
+                # db.record_image_generation), oldest month first. "created_at"
+                # is an ISO-8601 UTC timestamp, so its first 7 characters are
+                # always exactly "YYYY-MM" - no date parsing needed.
+                all_image_usage = db.list_all_image_usage()
+                images_by_month = {}
+                for u in all_image_usage:
+                    month = (u.get("created_at") or "")[:7]
+                    if month:
+                        images_by_month[month] = images_by_month.get(month, 0) + 1
+
                 self._send_json({
                     "purchases": {
                         "count": len(all_payments),
@@ -519,6 +544,10 @@ class Handler(BaseHTTPRequestHandler):
                         "total_credits_sold": total_credits_sold,
                     },
                     "coupon_usage": sorted(by_code.values(), key=lambda e: e["code"]),
+                    "images_total": len(all_image_usage),
+                    "images_by_month": [
+                        {"month": m, "count": c} for m, c in sorted(images_by_month.items())
+                    ],
                 })
                 return
 
@@ -1138,8 +1167,21 @@ class Handler(BaseHTTPRequestHandler):
                         f"scenes per story must be between {db.MIN_PAGE_COUNT} and {db.MAX_PAGE_COUNT}", 400)
                     return
 
+                signup_credits_raw = body.get("signup_credits")
+                try:
+                    signup_credits = int(signup_credits_raw)
+                except (TypeError, ValueError):
+                    self._send_error_json("free signup credits must be a whole number", 400)
+                    return
+                if not (db.MIN_SIGNUP_CREDITS <= signup_credits <= db.MAX_SIGNUP_CREDITS):
+                    self._send_error_json(
+                        f"free signup credits must be between "
+                        f"{db.MIN_SIGNUP_CREDITS} and {db.MAX_SIGNUP_CREDITS}", 400)
+                    return
+
                 settings = db.set_site_settings(
-                    site_name, footer_text, contact_email, contact_phone, page_count=page_count)
+                    site_name, footer_text, contact_email, contact_phone,
+                    page_count=page_count, signup_credits=signup_credits)
                 self._send_json({"ok": True, "settings": settings})
                 return
 
@@ -1172,6 +1214,42 @@ class Handler(BaseHTTPRequestHandler):
                 # was uploaded (re-encoded to JPEG here either way).
                 banner_path = os.path.join(config.STATIC_DIR, "kertoons_bar.jpg")
                 img.save(banner_path, format="JPEG", quality=90)
+                self._send_json({"ok": True})
+                return
+
+            if path == "/api/admin/footer_links/create":
+                if not self._require_admin():
+                    return
+                body = self._read_json_body()
+                name = (body.get("name") or "").strip()
+                url = (body.get("url") or "").strip()
+                new_tab = bool(body.get("new_tab"))
+                if not name or not url:
+                    self._send_error_json("page name and URL are required", 400)
+                    return
+                # This URL becomes a real href rendered into every visitor's
+                # page (see nav.js's _applyFooterLinks) - reject a
+                # javascript: scheme outright so a link couldn't be used to
+                # run script for every site visitor, not just validate shape.
+                if url.strip().lower().startswith("javascript:"):
+                    self._send_error_json("that URL scheme isn't allowed", 400)
+                    return
+                link = db.add_footer_link(name, url, new_tab)
+                self._send_json({"ok": True, "link": link})
+                return
+
+            if path == "/api/admin/footer_links/delete":
+                if not self._require_admin():
+                    return
+                body = self._read_json_body()
+                try:
+                    link_id = int(body.get("id"))
+                except (TypeError, ValueError):
+                    self._send_error_json("invalid link id", 400)
+                    return
+                if not db.delete_footer_link(link_id):
+                    self._send_error_json("unknown footer link", 404)
+                    return
                 self._send_json({"ok": True})
                 return
 

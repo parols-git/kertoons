@@ -44,9 +44,16 @@ DEFAULT_CONTACT_PHONE = ""
 # API call, and the story-writing model must return exactly this many).
 MIN_PAGE_COUNT = 2
 MAX_PAGE_COUNT = 10
+# Bounds for the admin-configurable "free credits for new accounts" setting -
+# 0 is a legitimate choice (no free credits at all), so this is intentionally
+# NOT enforced via a falsy/"or"-based default anywhere below (0 must survive,
+# not silently become DEFAULT_IMAGE_CREDITS).
+MIN_SIGNUP_CREDITS = 0
+MAX_SIGNUP_CREDITS = 500
 
 _SKELETON = {
     "next_user_id": 1,
+    "next_footer_link_id": 1,
     "users": [],
     "sessions": [],
     "stories": [],
@@ -54,12 +61,14 @@ _SKELETON = {
     "processed_payments": [],
     "coupons": [],
     "coupon_redemptions": [],
+    "footer_links": [],
     "site_settings": {
         "site_name": DEFAULT_SITE_NAME,
         "footer_text": DEFAULT_FOOTER_TEXT,
         "contact_email": DEFAULT_CONTACT_EMAIL,
         "contact_phone": DEFAULT_CONTACT_PHONE,
         "page_count": config.DEFAULT_PAGE_COUNT,
+        "signup_credits": DEFAULT_IMAGE_CREDITS,
     },
 }
 
@@ -123,13 +132,18 @@ def create_user(username: str, password_salt: str, password_hash: str, role: str
         data = _load()
         if any(u["username"].lower() == username.lower() for u in data["users"]):
             raise ValueError("username already taken")
+        # Reads the CURRENT admin-configured starting balance directly off
+        # the already-loaded `data` (not get_site_settings(), which would
+        # deadlock re-acquiring _LOCK) - same `.get(key, default)` care as
+        # get_site_settings() to let an admin-chosen 0 survive.
+        signup_credits = (data.get("site_settings") or {}).get("signup_credits", DEFAULT_IMAGE_CREDITS)
         user = {
             "id": data["next_user_id"],
             "username": username,
             "password_salt": password_salt,
             "password_hash": password_hash,
             "created_at": _now(),
-            "image_credits": DEFAULT_IMAGE_CREDITS,
+            "image_credits": signup_credits,
             "role": role,
             "status": "active",
         }
@@ -162,13 +176,14 @@ def create_admin_if_missing(username: str, password_salt: str, password_hash: st
             existing["role"] = "admin"
             _save(data)
             return "promoted"
+        signup_credits = (data.get("site_settings") or {}).get("signup_credits", DEFAULT_IMAGE_CREDITS)
         data["users"].append({
             "id": data["next_user_id"],
             "username": username,
             "password_salt": password_salt,
             "password_hash": password_hash,
             "created_at": _now(),
-            "image_credits": DEFAULT_IMAGE_CREDITS,
+            "image_credits": signup_credits,
             "role": "admin",
             "status": "active",
         })
@@ -460,6 +475,15 @@ def list_image_usage_for_user(user_id: int) -> list:
     return [u for u in data.get("image_usage", []) if u["user_id"] == user_id]
 
 
+def list_all_image_usage() -> list:
+    """Every image generated across every user (initial pages AND
+    "Regenerate image" clicks alike) - for the admin's monthly image-volume
+    report. list_image_usage_for_user() above is scoped to one user."""
+    with _LOCK:
+        data = _load()
+    return list(data.get("image_usage", []))
+
+
 def list_all_payments() -> list:
     """Every processed payment across every user, annotated with the payer's
     username (or None if since deleted) - for the admin purchase summary
@@ -562,14 +586,62 @@ def list_coupon_redemptions() -> list:
     return list(data.get("coupon_redemptions", []))
 
 
+# ----------------------------------------------------------- footer links
+
+def list_footer_links() -> list:
+    """Admin-added extra footer links (e.g. "Terms", "Privacy Policy"),
+    shown after FAQ/Help on every page - see static/nav.js's
+    _applyFooterLinks(), called from the same public GET /api/config every
+    page already fetches for site_name/footer_text/contact info. Returned in
+    the order they were added (oldest first), matching how they'll appear in
+    the footer left-to-right."""
+    with _LOCK:
+        data = _load()
+    return list(data.get("footer_links", []))
+
+
+def add_footer_link(name: str, url: str, new_tab: bool) -> dict:
+    with _LOCK:
+        data = _load()
+        link = {
+            "id": data.get("next_footer_link_id", 1),
+            "name": name,
+            "url": url,
+            "new_tab": bool(new_tab),
+            "created_at": _now(),
+        }
+        data.setdefault("footer_links", []).append(link)
+        data["next_footer_link_id"] = data.get("next_footer_link_id", 1) + 1
+        _save(data)
+        return link
+
+
+def delete_footer_link(link_id: int) -> bool:
+    """Returns True if a matching link was found and removed."""
+    with _LOCK:
+        data = _load()
+        links = data.get("footer_links", [])
+        remaining = [l for l in links if l.get("id") != link_id]
+        if len(remaining) == len(links):
+            return False
+        data["footer_links"] = remaining
+        _save(data)
+        return True
+
+
 # ---------------------------------------------------------- site settings
 
 def get_site_settings() -> dict:
     """Admin-configurable branding - site display name, the trailing footer
-    message, optional contact info, and how many scenes/pages each new story
-    gets, all shown on every page (or used at generation time). Falls back
-    to the defaults for data files saved before a given field existed (e.g.
-    contact_email/contact_phone, and later page_count)."""
+    message, optional contact info, how many scenes/pages each new story
+    gets, and how many free credits a new account starts with - all shown on
+    every page (or used at generation/signup time). Falls back to the
+    defaults for data files saved before a given field existed (e.g.
+    contact_email/contact_phone, and later page_count/signup_credits).
+    signup_credits deliberately uses `.get(key, default)` rather than `or`
+    like the other fields - 0 is a real, valid admin choice ("no free
+    credits") and must not be treated as unset the way an empty string or
+    a missing page_count would be."""
     with _LOCK:
         data = _load()
     settings = data.get("site_settings") or {}
@@ -579,11 +651,13 @@ def get_site_settings() -> dict:
         "contact_email": settings.get("contact_email") or DEFAULT_CONTACT_EMAIL,
         "contact_phone": settings.get("contact_phone") or DEFAULT_CONTACT_PHONE,
         "page_count": settings.get("page_count") or config.DEFAULT_PAGE_COUNT,
+        "signup_credits": settings.get("signup_credits", DEFAULT_IMAGE_CREDITS),
     }
 
 
 def set_site_settings(site_name: str, footer_text: str, contact_email: str = "",
-                       contact_phone: str = "", page_count: int = None) -> dict:
+                       contact_phone: str = "", page_count: int = None,
+                       signup_credits: int = None) -> dict:
     with _LOCK:
         data = _load()
         existing = data.get("site_settings") or {}
@@ -594,6 +668,8 @@ def set_site_settings(site_name: str, footer_text: str, contact_email: str = "",
             "contact_phone": contact_phone,
             "page_count": page_count if page_count is not None
             else (existing.get("page_count") or config.DEFAULT_PAGE_COUNT),
+            "signup_credits": signup_credits if signup_credits is not None
+            else existing.get("signup_credits", DEFAULT_IMAGE_CREDITS),
         }
         _save(data)
         return dict(data["site_settings"])

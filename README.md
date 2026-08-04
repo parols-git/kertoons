@@ -141,8 +141,9 @@ without waiting for a page reload.
 ## Image credits & buying more
 
 Every image generated (a story's initial 5 pages, or any "Regenerate image"
-click) costs 1 credit; new accounts start with 50 (`story_engine/db.py`).
-Once a balance goes negative, creating/regenerating is blocked until the
+click) costs 1 credit; new accounts start with 50 by default, admin-
+configurable from `/admin.html`'s Settings section (see "Admin panel"
+below). Once a balance goes negative, creating/regenerating is blocked until the
 account tops up. The nav bar's "Add credits" button sells one pack - 50
 credits for $5 - through **Stripe Checkout**, a payment page hosted entirely
 on Stripe's own domain (`story_engine/payments.py`); this app never receives
@@ -210,7 +211,10 @@ trust a client-reported role). From there an admin can:
   (`POST /api/coupons/redeem`).
 - View a purchases + coupon-redemption summary report
   (`GET /api/admin/reports/summary`): total purchases/revenue/credits sold,
-  and a per-coupon redemption count.
+  a per-coupon redemption count, and a total-images-generated stat with a
+  per-calendar-month breakdown (grouped from `db.list_all_image_usage()`'s
+  `created_at` timestamps - every initial-page AND "Regenerate image"
+  generation counts, oldest month first).
 - Rebrand the whole app under **Settings**: site name and footer text
   (`db.get_site_settings`/`set_site_settings`, `POST /api/admin/settings`).
   These are served publicly on `GET /api/config` since every page needs
@@ -252,6 +256,27 @@ trust a client-reported role). From there an admin can:
   (`pipeline.run_job`), not cached - takes effect on the very next story
   created, no restart needed. Stories already generated keep whatever page
   count they were made with; this only changes new ones.
+- Change how many **free image credits a new account starts with** (default
+  50, range 0-500 - `db.MIN_SIGNUP_CREDITS`/`MAX_SIGNUP_CREDITS`), read at
+  account-creation time by both `db.create_user` (the public `/api/register`
+  flow) and `db.create_admin_if_missing` (server startup bootstrap). 0 is a
+  valid choice (new accounts start with no free credits and must buy/redeem
+  a coupon before generating) - handled explicitly throughout
+  (`.get(key, default)` rather than `or`) so it isn't silently coerced back
+  to 50. Only affects accounts created after the change; existing balances
+  are untouched.
+- Add/remove extra **footer links** (e.g. "Terms", "Privacy Policy") shown
+  after FAQ/Help on every page, each with its own "open in a new tab" toggle
+  (`db.add_footer_link`/`list_footer_links`/`delete_footer_link`,
+  `POST /api/admin/footer_links/create`/`delete`). Public via
+  `GET /api/config` (every page already fetches this for site_name/etc.) and
+  rendered by `static/nav.js`'s `_applyFooterLinks()` into a
+  `#footer-custom-links` span present in every static page's footer AND the
+  server-rendered `share.html` template (`story_engine/share_page.py`) -
+  the only page that also calls `renderNav()` server-side-first. A
+  `javascript:` URL is rejected server-side (400) rather than merely
+  discouraged, since the URL becomes a real `href` rendered for every site
+  visitor, not just the admin who entered it.
 
 ## The Storytelling Expert skill (used for every story)
 

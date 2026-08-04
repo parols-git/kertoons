@@ -11,6 +11,8 @@ let storiesData = [];
 let storiesPage = 1;
 let couponsData = [];
 let couponsPage = 1;
+let footerLinksData = [];
+let footerLinksPage = 1;
 
 function _adminEscapeHtml(str) {
   if (str === undefined || str === null) return "";
@@ -304,6 +306,71 @@ async function toggleCoupon(code, active) {
   }
 }
 
+// --------------------------------------------------------- footer links
+
+async function loadFooterLinks() {
+  try {
+    const res = await fetch("api/admin/footer_links");
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Failed to load footer links");
+    footerLinksData = data.footer_links || [];
+    footerLinksPage = 1;
+    renderFooterLinksPage();
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+function renderFooterLinksPage() {
+  const wrap = document.getElementById("footer-links-table-wrap");
+  if (!footerLinksData.length) {
+    wrap.innerHTML = `<p class="hint">No footer links yet.</p>`;
+    return;
+  }
+  const totalPages = Math.max(1, Math.ceil(footerLinksData.length / ADMIN_PAGE_SIZE));
+  if (footerLinksPage > totalPages) footerLinksPage = totalPages;
+  const pageItems = _adminPageItems(footerLinksData, footerLinksPage);
+
+  const rowsHtml = pageItems.map(l => `
+    <tr>
+      <td>${_adminEscapeHtml(l.name)}</td>
+      <td>${_adminEscapeHtml(l.url)}</td>
+      <td>${l.new_tab ? "New tab" : "Same page"}</td>
+      <td>
+        <button type="button" class="btn-outline btn-admin-row" onclick="deleteFooterLink(${l.id})">Delete</button>
+      </td>
+    </tr>`
+  ).join("");
+
+  wrap.innerHTML = `
+    <table class="usage-table">
+      <thead><tr><th>Page name</th><th>Page URL</th><th>Opens in</th><th>Actions</th></tr></thead>
+      <tbody>${rowsHtml}</tbody>
+    </table>
+    ${_adminPaginationHtml(footerLinksData, footerLinksPage, "changeFooterLinksPage")}
+  `;
+}
+
+function changeFooterLinksPage(delta) {
+  footerLinksPage += delta;
+  renderFooterLinksPage();
+}
+
+async function deleteFooterLink(id) {
+  if (!confirm("Remove this footer link?")) return;
+  try {
+    const res = await fetch("api/admin/footer_links/delete", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Failed to remove footer link");
+    loadFooterLinks();
+  } catch (e) {
+    alert(e.message);
+  }
+}
+
 // -------------------------------------------------------------- settings
 
 async function loadSettings() {
@@ -318,6 +385,11 @@ async function loadSettings() {
     document.getElementById("settings-contact-email").value = data.contact_email || "";
     document.getElementById("settings-contact-phone").value = data.contact_phone || "";
     document.getElementById("settings-page-count").value = data.page_count || 5;
+    // 0 is a valid, meaningful value here (no free credits) - only fall
+    // back to 50 when the field is genuinely missing/undefined, not when
+    // it's the number 0 (which `|| 50` would incorrectly override).
+    document.getElementById("settings-signup-credits").value =
+      data.signup_credits !== undefined ? data.signup_credits : 50;
   } catch (e) {
     console.error(e);
   }
@@ -337,28 +409,52 @@ async function loadReports() {
         <div class="reports-stat"><div class="reports-stat-value">${p.count || 0}</div><div class="reports-stat-label">Purchases</div></div>
         <div class="reports-stat"><div class="reports-stat-value">$${Number(p.total_revenue_usd || 0).toFixed(2)}</div><div class="reports-stat-label">Total revenue</div></div>
         <div class="reports-stat"><div class="reports-stat-value">${p.total_credits_sold || 0}</div><div class="reports-stat-label">Credits sold</div></div>
+        <div class="reports-stat"><div class="reports-stat-value">${data.images_total || 0}</div><div class="reports-stat-label">Images generated (all time)</div></div>
       </div>
     `;
 
     const usage = data.coupon_usage || [];
-    const wrap = document.getElementById("reports-coupons-wrap");
+    const couponsWrap = document.getElementById("reports-coupons-wrap");
     if (!usage.length) {
-      wrap.innerHTML = `<p class="hint">No coupon redemptions yet.</p>`;
-      return;
+      couponsWrap.innerHTML = `<p class="hint">No coupon redemptions yet.</p>`;
+    } else {
+      const rowsHtml = usage.map(u => `
+        <tr>
+          <td>${_adminEscapeHtml(u.code)}</td>
+          <td>${u.count}</td>
+          <td>${u.credits_granted}</td>
+        </tr>`
+      ).join("");
+      couponsWrap.innerHTML = `
+        <table class="usage-table">
+          <thead><tr><th>Coupon code</th><th>Times redeemed</th><th>Credits granted</th></tr></thead>
+          <tbody>${rowsHtml}</tbody>
+        </table>
+      `;
     }
-    const rowsHtml = usage.map(u => `
-      <tr>
-        <td>${_adminEscapeHtml(u.code)}</td>
-        <td>${u.count}</td>
-        <td>${u.credits_granted}</td>
-      </tr>`
-    ).join("");
-    wrap.innerHTML = `
-      <table class="usage-table">
-        <thead><tr><th>Coupon code</th><th>Times redeemed</th><th>Credits granted</th></tr></thead>
-        <tbody>${rowsHtml}</tbody>
-      </table>
-    `;
+
+    // "Month" here is a plain "YYYY-MM" string (see server.py) - already in
+    // chronological sort order as a string, so no date parsing is needed to
+    // display it oldest-first.
+    const monthly = data.images_by_month || [];
+    const monthlyWrap = document.getElementById("reports-images-by-month-wrap");
+    if (!monthly.length) {
+      monthlyWrap.innerHTML = `<p class="hint">No images generated yet.</p>`;
+    } else {
+      const monthRowsHtml = monthly.map(m => `
+        <tr>
+          <td>${_adminEscapeHtml(m.month)}</td>
+          <td>${m.count}</td>
+        </tr>`
+      ).join("");
+      monthlyWrap.innerHTML = `
+        <table class="usage-table">
+          <thead><tr><th>Month</th><th>Images generated</th></tr></thead>
+          <tbody>${monthRowsHtml}</tbody>
+          <tfoot><tr><td><strong>Total</strong></td><td><strong>${data.images_total || 0}</strong></td></tr></tfoot>
+        </table>
+      `;
+    }
   } catch (e) {
     console.error(e);
   }
@@ -404,6 +500,26 @@ document.getElementById("create-coupon-form").addEventListener("submit", async (
   }
 });
 
+document.getElementById("create-footer-link-form").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const name = document.getElementById("new-footer-link-name").value.trim();
+  const url = document.getElementById("new-footer-link-url").value.trim();
+  const new_tab = document.getElementById("new-footer-link-new-tab").checked;
+  try {
+    const res = await fetch("api/admin/footer_links/create", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, url, new_tab }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Failed to add footer link");
+    document.getElementById("create-footer-link-form").reset();
+    _adminShowBanner(`Footer link "${name}" added.`, "success");
+    loadFooterLinks();
+  } catch (e) {
+    alert(e.message);
+  }
+});
+
 document.getElementById("settings-form").addEventListener("submit", async (ev) => {
   ev.preventDefault();
   const site_name = document.getElementById("settings-site-name").value.trim();
@@ -411,10 +527,11 @@ document.getElementById("settings-form").addEventListener("submit", async (ev) =
   const contact_email = document.getElementById("settings-contact-email").value.trim();
   const contact_phone = document.getElementById("settings-contact-phone").value.trim();
   const page_count = parseInt(document.getElementById("settings-page-count").value, 10);
+  const signup_credits = parseInt(document.getElementById("settings-signup-credits").value, 10);
   try {
     const res = await fetch("api/admin/settings", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ site_name, footer_text, contact_email, contact_phone, page_count }),
+      body: JSON.stringify({ site_name, footer_text, contact_email, contact_phone, page_count, signup_credits }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "Failed to save settings");
@@ -466,5 +583,6 @@ document.getElementById("banner-upload-btn").addEventListener("click", () => {
   loadUsers();
   loadStories();
   loadCoupons();
+  loadFooterLinks();
   loadReports();
 })();
