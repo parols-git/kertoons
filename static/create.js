@@ -178,15 +178,17 @@ function _myStoryRowHtml(s) {
     : `<div class="my-story-thumb my-story-thumb-placeholder"></div>`;
   return `
     <div class="my-story-row">
-      <div class="my-story-title">
-        ${thumbHtml}
-        ${s.ready
-          ? `<a href="story.html?job_id=${s.job_id}">${escapeHtml(s.title)}</a>`
-          : `<span>${escapeHtml(s.job_id)} (still generating...)</span>`}
-      </div>
-      <div class="my-story-actions">
-        <span class="status-badge ${s.published ? "published" : "unpublished"}">${s.published ? "Published" : "Unpublished"}</span>
-        <button type="button" class="btn-outline btn-delete" onclick="deleteStory('${s.job_id}', '${safeLabel}')">🗑 Delete</button>
+      ${thumbHtml}
+      <div class="my-story-body">
+        <div class="my-story-title">
+          ${s.ready
+            ? `<a href="story.html?job_id=${s.job_id}">${escapeHtml(s.title)}</a>`
+            : `<span>${escapeHtml(s.job_id)} (still generating...)</span>`}
+        </div>
+        <div class="my-story-actions">
+          <span class="status-badge ${s.published ? "published" : "unpublished"}">${s.published ? "Published" : "Unpublished"}</span>
+          <button type="button" class="btn-outline btn-delete" onclick="deleteStory('${s.job_id}', '${safeLabel}')">🗑 Delete</button>
+        </div>
       </div>
     </div>`;
 }

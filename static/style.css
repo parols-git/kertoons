@@ -393,8 +393,8 @@ button {
 
 .my-story-row {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
+  align-items: flex-start;
+  gap: 12px;
   padding: 10px 0;
   border-top: 1px solid var(--border);
   font-size: 0.92rem;
@@ -405,12 +405,15 @@ button {
 .my-story-row a { color: var(--ink); font-weight: 600; text-decoration: none; }
 .my-story-row a:hover { text-decoration: underline; }
 
-.my-story-title {
+.my-story-body {
   display: flex;
-  align-items: center;
-  gap: 12px;
+  flex-direction: column;
+  gap: 6px;
   min-width: 0;
+  flex: 1;
 }
+
+.my-story-title { min-width: 0; }
 
 .my-story-thumb {
   width: 80px;
