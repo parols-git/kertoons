@@ -45,7 +45,7 @@ _PAGE_TEMPLATE = """<!DOCTYPE html>
 </head>
 <body>
 <header>
-  <h1>🧸 __SITE_NAME__</h1>
+  <h1><img src="static/logo.png" alt="Kertoons" class="site-logo"></h1>
   <nav id="nav-bar" class="nav-bar"></nav>
 </header>
 
