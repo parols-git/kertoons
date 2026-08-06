@@ -409,6 +409,35 @@ document.getElementById("banner-upload-btn").addEventListener("click", () => {
   reader.readAsDataURL(file);
 });
 
+document.getElementById("logo-upload-btn").addEventListener("click", () => {
+  const input = document.getElementById("logo-upload-input");
+  const file = input.files[0];
+  if (!file) {
+    alert("Choose an image file first.");
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = async () => {
+    try {
+      const res = await fetch("api/admin/settings/logo", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ image_base64: reader.result }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to upload image");
+      // Same filename every time (server always overwrites static/logo.png),
+      // so a cache-busting query param is the only way to see the new file
+      // without a hard refresh.
+      document.getElementById("logo-preview").src = `static/logo.png?v=${Date.now()}`;
+      input.value = "";
+      _adminShowBanner("Site logo updated.", "success");
+    } catch (e) {
+      alert(e.message);
+    }
+  };
+  reader.readAsDataURL(file);
+});
+
 document.getElementById("reports-year-filter").addEventListener("change", renderImagesByMonthTable);
 document.getElementById("reports-month-filter").addEventListener("change", renderImagesByMonthTable);
 

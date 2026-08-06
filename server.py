@@ -81,6 +81,10 @@ MAX_CUSTOM_PROMPT_LEN = 2000
 # The admin panel's main-banner upload (see /api/admin/settings/banner) -
 # generous for a marketing image, just there to stop a pathological payload.
 MAX_BANNER_UPLOAD_BYTES = 8 * 1024 * 1024
+# The admin panel's site-logo upload (see /api/admin/settings/logo) - a
+# header wordmark never needs to be this big, just there to stop a
+# pathological payload.
+MAX_LOGO_UPLOAD_BYTES = 4 * 1024 * 1024
 
 
 def new_job_id():
@@ -1283,6 +1287,44 @@ class Handler(BaseHTTPRequestHandler):
                 # was uploaded (re-encoded to JPEG here either way).
                 banner_path = os.path.join(config.STATIC_DIR, "kertoons_bar.jpg")
                 img.save(banner_path, format="JPEG", quality=90)
+                self._send_json({"ok": True})
+                return
+
+            if path == "/api/admin/settings/logo":
+                if not self._require_admin():
+                    return
+                body = self._read_json_body()
+                image_b64 = body.get("image_base64") or ""
+                if not image_b64:
+                    self._send_error_json("image is required", 400)
+                    return
+                try:
+                    header, b64data = image_b64.split(",", 1) if "," in image_b64 else ("", image_b64)
+                    image_bytes = base64.b64decode(b64data)
+                except Exception:
+                    self._send_error_json("invalid image data", 400)
+                    return
+                if len(image_bytes) > MAX_LOGO_UPLOAD_BYTES:
+                    self._send_error_json(
+                        f"image is too large (max {MAX_LOGO_UPLOAD_BYTES // (1024 * 1024)} MB)", 400)
+                    return
+                try:
+                    img = Image.open(io.BytesIO(image_bytes))
+                    # Unlike the banner (flattened to opaque JPEG), the logo
+                    # sits directly on every page's header background, so
+                    # its transparency (a header logo is normally a PNG with
+                    # a transparent background) is preserved rather than
+                    # flattened to a solid color.
+                    img = img.convert("RGBA")
+                except Exception:
+                    self._send_error_json("could not read image - is it a valid image file?", 400)
+                    return
+                # Always the same filename ("logo.png", same as the repo's
+                # original asset) and always overwritten - every page's
+                # <img src="static/logo.png"> never needs to change,
+                # regardless of what filename was uploaded.
+                logo_path = os.path.join(config.STATIC_DIR, "logo.png")
+                img.save(logo_path, format="PNG")
                 self._send_json({"ok": True})
                 return
 

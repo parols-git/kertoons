@@ -682,6 +682,18 @@ input.gallery-search-input {
   margin-top: 4px;
 }
 
+.logo-preview {
+  display: block;
+  height: 44px;
+  width: auto;
+  max-width: 100%;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  padding: 6px 10px;
+  margin-top: 4px;
+  background: var(--card);
+}
+
 .btn-admin-row {
   padding: 5px 12px;
   font-size: 0.75rem;
