@@ -18,8 +18,17 @@
 
   <img class="marketing-banner" src="static/kertoons_bar.jpg" alt="Elevate Kids Learning with AI Storybooks">
 
+  <div class="gallery-search-row">
+    <span class="gallery-search-icon" aria-hidden="true">🔍</span>
+    <input type="text" id="gallery-search" class="gallery-search-input"
+           placeholder="Search stories by title..." autocomplete="off">
+  </div>
+
   <p id="gallery-empty" class="hint" style="text-align:center; display:none;">
     No published stories yet - be the first! <a href="create.html">Create one</a>.
+  </p>
+  <p id="gallery-no-matches" class="hint" style="text-align:center; display:none;">
+    No stories match your search.
   </p>
   <div id="gallery-grid" class="gallery-grid"></div>
   <div id="gallery-pagination"></div>

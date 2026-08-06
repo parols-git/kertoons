@@ -1,5 +1,6 @@
 let galleryData = [];
 let galleryPage = 1;
+let gallerySearchQuery = "";
 // Same page size as the "My Stories" / "Image usage" / "Payment history"
 // lists (see create.js/usage.js), for consistency across the app.
 const GALLERY_PAGE_SIZE = 6;
@@ -21,6 +22,7 @@ async function loadGallery() {
     galleryData = data.stories || [];
     if (!galleryData.length) {
       empty.style.display = "block";
+      document.getElementById("gallery-no-matches").style.display = "none";
       document.getElementById("gallery-grid").innerHTML = "";
       document.getElementById("gallery-pagination").innerHTML = "";
       return;
@@ -33,14 +35,30 @@ async function loadGallery() {
   }
 }
 
+function _filteredGalleryData() {
+  const query = gallerySearchQuery.trim().toLowerCase();
+  if (!query) return galleryData;
+  return galleryData.filter(s => (s.title || "").toLowerCase().includes(query));
+}
+
 function renderGalleryPage() {
   const grid = document.getElementById("gallery-grid");
   const pagination = document.getElementById("gallery-pagination");
+  const noMatches = document.getElementById("gallery-no-matches");
 
-  const totalPages = Math.max(1, Math.ceil(galleryData.length / GALLERY_PAGE_SIZE));
+  const filtered = _filteredGalleryData();
+  if (!filtered.length) {
+    grid.innerHTML = "";
+    pagination.innerHTML = "";
+    noMatches.style.display = gallerySearchQuery.trim() ? "block" : "none";
+    return;
+  }
+  noMatches.style.display = "none";
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / GALLERY_PAGE_SIZE));
   if (galleryPage > totalPages) galleryPage = totalPages;
   const start = (galleryPage - 1) * GALLERY_PAGE_SIZE;
-  const pageItems = galleryData.slice(start, start + GALLERY_PAGE_SIZE);
+  const pageItems = filtered.slice(start, start + GALLERY_PAGE_SIZE);
 
   grid.innerHTML = pageItems.map(s => `
     <div class="gallery-card">
@@ -57,7 +75,7 @@ function renderGalleryPage() {
     </div>
   `).join("");
 
-  pagination.innerHTML = galleryData.length > GALLERY_PAGE_SIZE ? `
+  pagination.innerHTML = filtered.length > GALLERY_PAGE_SIZE ? `
     <div class="pagination-row">
       <button type="button" class="btn-outline btn-page" onclick="changeGalleryPage(-1)" ${galleryPage <= 1 ? "disabled" : ""}>‹ Prev</button>
       <span class="pagination-status">Page ${galleryPage} of ${totalPages}</span>
@@ -112,8 +130,15 @@ async function handleCheckoutReturn() {
   window.history.replaceState({}, "", window.location.pathname);
 }
 
+function _onGallerySearchInput(e) {
+  gallerySearchQuery = e.target.value;
+  galleryPage = 1;
+  renderGalleryPage();
+}
+
 (async () => {
   await handleCheckoutReturn();
   await renderNav(); // after a successful purchase, refresh the credit count shown in the nav too
+  document.getElementById("gallery-search").addEventListener("input", _onGallerySearchInput);
   loadGallery();
 })();

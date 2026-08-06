@@ -563,6 +563,34 @@ button {
 }
 .btn-delete:hover { background: #fdecec; }
 
+.gallery-search-row {
+  position: relative;
+  max-width: 420px;
+  margin: 0 0 24px;
+}
+
+.gallery-search-icon {
+  position: absolute;
+  left: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 0.95rem;
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+.gallery-search-input {
+  width: 100%;
+  padding: 10px 12px 10px 38px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  font-size: 0.95rem;
+  font-family: inherit;
+  background: var(--card);
+  color: var(--ink);
+}
+.gallery-search-input:focus { outline: 2px solid var(--accent-2); }
+
 .gallery-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
