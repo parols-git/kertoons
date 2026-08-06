@@ -187,6 +187,7 @@ function _myStoryRowHtml(s) {
         </div>
         <div class="my-story-actions">
           <span class="status-badge ${s.published ? "published" : "unpublished"}">${s.published ? "Published" : "Unpublished"}</span>
+          ${s.ready ? `<span class="view-count-badge">👁 ${s.view_count || 0}</span>` : ""}
           <button type="button" class="btn-outline btn-delete" onclick="deleteStory('${s.job_id}', '${safeLabel}')">🗑 Delete</button>
         </div>
       </div>

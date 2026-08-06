@@ -341,6 +341,7 @@ def create_story_record(job_id: str, user_id: int):
             "user_id": user_id,
             "published": False,
             "created_at": _now(),
+            "view_count": 0,
         })
         _save(data)
 
@@ -375,6 +376,26 @@ def set_story_published(job_id: str, published: bool) -> bool:
         record["published"] = bool(published)
         _save(data)
         return True
+
+
+def increment_story_view_count(job_id: str) -> int:
+    """Bumps job_id's view counter by one and returns the new total (0 if no
+    matching record exists - shouldn't happen since the caller, GET
+    /api/story/view, has already resolved the story via _can_view first).
+    Called on every successful story view - by its owner, by an admin, or by
+    any other visitor of a published story - since GET /api/story/view is
+    the single endpoint all of them load a story's content through.
+    "view_count" defaults to 0 via .get() rather than a stored default so
+    records created before this field existed still increment correctly
+    instead of raising a KeyError."""
+    with _LOCK:
+        data = _load()
+        record = _find_story(data, job_id)
+        if not record:
+            return 0
+        record["view_count"] = record.get("view_count", 0) + 1
+        _save(data)
+        return record["view_count"]
 
 
 def delete_story_record(job_id: str) -> bool:

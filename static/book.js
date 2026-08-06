@@ -288,6 +288,7 @@ function renderBook(container, jobId, story, opts = {}) {
         <h2>${escapeHtml(story.title)}</h2>
         <div>Region: ${escapeHtml(story.region)}</div>
         ${opts.author ? `<div class="author-line">by ${escapeHtml(opts.author)}</div>` : ""}
+        <div class="view-count-line">👁 ${(opts.viewCount || 0).toLocaleString()} view${opts.viewCount === 1 ? "" : "s"}</div>
         <div class="moral">"${escapeHtml(story.moral)}"</div>
       </div>
       <div class="pdf-quality-row">

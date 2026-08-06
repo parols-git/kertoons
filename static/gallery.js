@@ -48,7 +48,7 @@ function renderGalleryPage() {
         <img src="api/story/image?job_id=${s.job_id}&page=1" alt="${_galleryEscapeHtml(s.title)} cover">
         <div class="gallery-card-body">
           <h3>${_galleryEscapeHtml(s.title)}</h3>
-          <div class="gallery-card-meta">by ${_galleryEscapeHtml(s.author)}${s.region ? " · " + _galleryEscapeHtml(s.region) : ""}</div>
+          <div class="gallery-card-meta">by ${_galleryEscapeHtml(s.author)}${s.region ? " · " + _galleryEscapeHtml(s.region) : ""} · 👁 ${s.view_count || 0}</div>
         </div>
       </a>
       <div class="gallery-card-actions">

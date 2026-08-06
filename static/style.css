@@ -372,6 +372,14 @@ button {
 }
 
 .author-line { color: var(--muted); font-size: 0.85rem; margin-top: 2px; }
+.view-count-line { color: var(--muted); font-size: 0.85rem; margin-top: 2px; }
+
+.view-count-badge {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--muted);
+  white-space: nowrap;
+}
 
 .publish-row {
   display: flex;

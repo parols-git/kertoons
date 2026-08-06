@@ -22,6 +22,7 @@ async function loadStory() {
       published: data.published,
       author: data.author,
       pdfAvailable: data.pdf_available,
+      viewCount: data.view_count,
     });
     bookSection.classList.add("show");
   } catch (err) {

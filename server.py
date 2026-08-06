@@ -447,6 +447,7 @@ class Handler(BaseHTTPRequestHandler):
                         "region": story.get("region", ""),
                         "moral": story.get("moral", ""),
                         "author": owner["username"],
+                        "view_count": r.get("view_count", 0),
                     })
                 self._send_json({"stories": items})
                 return
@@ -465,6 +466,7 @@ class Handler(BaseHTTPRequestHandler):
                         "title": story.get("title") if story else None,
                         "ready": story is not None,
                         "published": r["published"],
+                        "view_count": r.get("view_count", 0),
                     })
                 self._send_json({"stories": items})
                 return
@@ -522,6 +524,7 @@ class Handler(BaseHTTPRequestHandler):
                         "published": r["published"],
                         "owner_username": r.get("owner_username"),
                         "created_at": r["created_at"],
+                        "view_count": r.get("view_count", 0),
                     })
                 self._send_json({"stories": items})
                 return
@@ -624,6 +627,7 @@ class Handler(BaseHTTPRequestHandler):
                 if not story:
                     self._send_error_json("story not ready", 404)
                     return
+                view_count = db.increment_story_view_count(job_id)
                 owner_id = db.get_story_owner_id(job_id)
                 owner = db.get_user_by_id(owner_id)
                 user = self._current_user()
@@ -645,6 +649,7 @@ class Handler(BaseHTTPRequestHandler):
                     "is_owner": bool(user and user["id"] == owner_id),
                     "published": db.is_story_published(job_id),
                     "pdf_available": pdf_available,
+                    "view_count": view_count,
                 })
                 return
 
