@@ -156,29 +156,52 @@ def _add_watermark(image_bytes: bytes, text: str) -> bytes:
 # the image API keeps flagging the prompt as unsafe.
 MAX_PROMPT_ADJUST_ATTEMPTS = 3
 
+# Same cap server.py enforces on hand-edited custom prompts (see
+# MAX_CUSTOM_PROMPT_LEN) - the image API rejects overlong prompts outright,
+# and a story with a large cast (each character's full 5-slot appearance
+# repeated in character_block) plus a detailed panel_visual can otherwise
+# exceed it. Enforced in build_prompt() below.
+MAX_IMAGE_PROMPT_LEN = 2000
+
+
+def _truncate(text: str, limit: int) -> str:
+    """Cut `text` down to at most `limit` characters without severing the
+    last word, so a length-capped prompt never ends mid-word."""
+    if len(text) <= limit:
+        return text
+    cut = text[:limit].rsplit(" ", 1)[0]
+    return cut if cut else text[:limit]
+
 
 def _soften_prompt(character_block: str, scene_text: str, region: str, level: int) -> str:
     """Progressively more conservative rewrite of the image prompt, used
     after the image API rejects one as unsafe. There's no way to know which
     specific phrase tripped the filter, so each level strips away more
-    potentially-flaggable specificity rather than guessing at a fix."""
+    potentially-flaggable specificity rather than guessing at a fix.
+
+    Capped at MAX_IMAGE_PROMPT_LEN like build_prompt() - these rewrites are
+    normally short, but a large character_block or an unusually long
+    scene_text could still push one over the limit."""
     if level == 1:
-        return (
+        result = (
             f"Wholesome, G-rated, family-friendly children's picture-book illustration, "
             f"PIXAR 3D cartoon style. Characters: {character_block}. Setting: {region}. "
             f"Scene: {scene_text}. Bright, cheerful, gentle mood, nothing scary or violent, "
             f"kid-safe soft pastel colors."
         )
-    # Final fallback: no character-appearance specifics left (the more
-    # likely trigger for a safety filter), but `scene_text` is deliberately
-    # KEPT - dropping it here would mean every page that reaches this level
-    # gets the exact same generic prompt (differing only by region), which
-    # would produce near-identical images for every one of them.
-    return (
-        f"A warm, gentle, G-rated PIXAR-style 3D cartoon illustration for a children's picture book, "
-        f"set in {region}. Scene: {scene_text}. Friendly, cheerful characters. Bright, "
-        f"soft pastel colors, nothing scary, violent, or inappropriate."
-    )
+    else:
+        # Final fallback: no character-appearance specifics left (the more
+        # likely trigger for a safety filter), but `scene_text` is
+        # deliberately KEPT - dropping it here would mean every page that
+        # reaches this level gets the exact same generic prompt (differing
+        # only by region), which would produce near-identical images for
+        # every one of them.
+        result = (
+            f"A warm, gentle, G-rated PIXAR-style 3D cartoon illustration for a children's picture book, "
+            f"set in {region}. Scene: {scene_text}. Friendly, cheerful characters. Bright, "
+            f"soft pastel colors, nothing scary, violent, or inappropriate."
+        )
+    return _truncate(result, MAX_IMAGE_PROMPT_LEN)
 
 
 def build_prompt(character_block: str, scene_text: str, region: str,
@@ -197,15 +220,24 @@ def build_prompt(character_block: str, scene_text: str, region: str,
     always differ. A text-to-image API given the exact same prompt twice
     tends to return the exact same (or near-identical) image, so this is
     the cheapest reliable lever this app has over "every page's image must
-    actually look different" beyond just asking nicely in the wording."""
+    actually look different" beyond just asking nicely in the wording.
+
+    The result is always at most MAX_IMAGE_PROMPT_LEN characters. The
+    character block and this page's own scene text are what actually
+    determine what gets drawn, so they're always included in full; the
+    fixed variety/consistency boilerplate below is appended only as space
+    allows, and trimmed first (from the end) if a large cast's
+    character_block would otherwise push the prompt over the limit."""
     uniqueness_clause = ""
     if page_number and total_pages:
         uniqueness_clause = (
             f" This is page {page_number} of {total_pages} - it must be immediately, "
             f"visually distinguishable from every other page in this book, not merely similar."
         )
-    return (
-        f"PIXAR 3D cartoon style, {character_block}. Setting: {region}. Scene: {scene_text}."
+
+    core = f"PIXAR 3D cartoon style, {character_block}. Setting: {region}. Scene: {scene_text}."
+
+    boilerplate = (
         f"{uniqueness_clause} "
         f"This illustration must look STRIKINGLY, OBVIOUSLY different from every other page in "
         f"this book at a glance - a different pose and action for each character, a different "
@@ -219,6 +251,15 @@ def build_prompt(character_block: str, scene_text: str, region: str,
         f"objects appear elsewhere in the scene. "
         f"Kid-safe soft pastel colors."
     )
+
+    # +1 for the space joining core and boilerplate.
+    remaining = MAX_IMAGE_PROMPT_LEN - len(core) - 1
+    if remaining <= 0:
+        # An unusually large cast alone exceeds the limit - trim the core
+        # itself rather than send an over-limit prompt with no boilerplate.
+        return _truncate(core, MAX_IMAGE_PROMPT_LEN)
+
+    return f"{core} {_truncate(boilerplate, remaining)}"
 
 
 def generate_scene_image(character_block: str, scene_text: str, region: str = "",
