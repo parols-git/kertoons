@@ -10,6 +10,10 @@ kertoons_data.json
 # never commit. See story_engine/backend_config.py.
 kertoons_backend.json
 
+# Admin-saved overrides for OpenAI/Gemini/DeepAI/Stripe API keys - real
+# secrets, never commit. See story_engine/api_config.py.
+kertoons_api_keys.json
+
 # Generated stories (images, PDFs, ZIPs) - user content, not source, and
 # large. Keep the directory tracked but not its contents.
 generated/*

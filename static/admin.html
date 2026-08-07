@@ -105,6 +105,15 @@
     </section>
 
     <section class="card">
+      <h2>API Keys</h2>
+      <p class="hint">OpenAI, Gemini, DeepAI, and Stripe credentials - previously only settable by editing <code>.env</code> on the server. Leave a field blank to keep whatever's already saved; changes take effect the next time the app restarts, not instantly.</p>
+      <form id="api-keys-form">
+        <div id="api-keys-rows"></div>
+        <button type="submit" class="btn-secondary" style="margin-top:10px;">Save API keys</button>
+      </form>
+    </section>
+
+    <section class="card">
       <h2>Manage</h2>
       <div class="admin-inline-form">
         <a class="btn-secondary" href="admin-users.html">👤 Users</a>

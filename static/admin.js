@@ -301,6 +301,66 @@ document.getElementById("database-switch-json-btn").addEventListener("click", as
   }
 });
 
+// ------------------------------------------------------------- api keys
+
+const API_KEY_LABELS = {
+  OPENAI_API_KEY: "OpenAI API key",
+  GEMINI_API_KEY: "Gemini API key",
+  DEEPAI_API_KEY: "DeepAI API key",
+  STRIPE_PAYMENT_LINK: "Stripe payment link",
+  STRIPE_SECRET_KEY: "Stripe secret key",
+  STRIPE_WEBHOOK_SECRET: "Stripe webhook secret",
+};
+
+function _apiKeyStatusText(info) {
+  if (!info.set) return "Not set - running in mock/demo mode for this key";
+  const source = info.source === "admin" ? "saved here" : "from .env";
+  return `Currently set (${source}): ${info.masked}`;
+}
+
+async function loadApiKeysStatus() {
+  try {
+    const res = await fetch("api/admin/api-keys/status");
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Failed to load API key status");
+
+    const rows = document.getElementById("api-keys-rows");
+    rows.innerHTML = Object.entries(API_KEY_LABELS).map(([key, label]) => `
+      <div style="margin-bottom:14px;">
+        <label for="api-key-${key}" style="display:block; font-weight:600; margin-bottom:2px;">${label}</label>
+        <div class="hint" style="margin-bottom:4px;">${_apiKeyStatusText(data.keys[key])}</div>
+        <input type="password" id="api-key-${key}" data-key="${key}" placeholder="Leave blank to keep current value" autocomplete="off" style="width:100%; max-width:420px;">
+      </div>
+    `).join("");
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+document.getElementById("api-keys-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const updates = {};
+  document.querySelectorAll("#api-keys-rows input[data-key]").forEach((input) => {
+    if (input.value.trim()) updates[input.dataset.key] = input.value.trim();
+  });
+  if (!Object.keys(updates).length) {
+    _adminShowBanner("No changes to save - every field was left blank.", "success");
+    return;
+  }
+  try {
+    const res = await fetch("api/admin/api-keys/update", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(updates),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Failed to save API keys");
+    _adminShowBanner("API keys saved - restart the app for the change to take effect.", "success");
+    loadApiKeysStatus();
+  } catch (e) {
+    alert(e.message);
+  }
+});
+
 // -------------------------------------------------------------- reports
 
 async function loadReports() {
@@ -551,6 +611,7 @@ function _isAdminRole(role) {
   document.getElementById("admin-panel").style.display = "block";
   loadSettings();
   loadDatabaseStatus();
+  loadApiKeysStatus();
   loadCoupons();
   loadFooterLinks();
   loadReports();

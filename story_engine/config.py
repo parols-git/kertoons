@@ -14,7 +14,26 @@ try:
 except Exception:
     pass  # dotenv is optional; env vars can also be set directly
 
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "").strip()
+# Admin-edited API keys (see Admin > API Keys / story_engine/api_config.py)
+# always win over the env var of the same name - _key() below is just
+# os.environ.get() with that override layered on top. Read once here, same
+# "takes effect on next restart" contract every other value in this module
+# already has (nothing in config.py is re-read after import). A bare
+# try/except around the import itself, not just the lookup, since
+# api_config.py's very first run (no kertoons_api_keys.json yet) must be
+# exactly as harmless as it having never existed.
+try:
+    from .api_config import get_overrides as _get_api_key_overrides
+    _API_KEY_OVERRIDES = _get_api_key_overrides()
+except Exception:
+    _API_KEY_OVERRIDES = {}
+
+
+def _key(name: str, default: str = "") -> str:
+    return (_API_KEY_OVERRIDES.get(name) or os.environ.get(name, default)).strip()
+
+
+OPENAI_API_KEY = _key("OPENAI_API_KEY")
 OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
 
 # Translation defaults to Gemini instead of OpenAI (a deliberate deviation
@@ -22,7 +41,7 @@ OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
 # gemini_client.py) but is switchable back to OpenAI (story_engine/
 # openai_client.py's translate_story) by setting TRANSLATION_PROVIDER=openai
 # - useful if you'd rather depend on only one LLM provider for everything.
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
+GEMINI_API_KEY = _key("GEMINI_API_KEY")
 # "-latest" alias (rather than a pinned version like "gemini-2.0-flash")
 # since Google retires pinned model versions over time and a hardcoded one
 # 404s once retired - the alias always points at Google's current
@@ -39,7 +58,7 @@ if TRANSLATION_PROVIDER not in ("gemini", "openai"):
 # DeepAI by default under the DEEPAI_API_KEY name. If you actually have a
 # different "Deepak.org" endpoint, set DEEPAI_BASE_URL accordingly and the
 # image client will call that instead - see story_engine/image_client.py.
-DEEPAI_API_KEY = os.environ.get("DEEPAI_API_KEY", "").strip()
+DEEPAI_API_KEY = _key("DEEPAI_API_KEY")
 DEEPAI_BASE_URL = os.environ.get("DEEPAI_BASE_URL", "https://api.deepai.org/api/text2img")
 
 # Selling image credits - via Stripe Checkout (a Stripe-hosted payment page,
@@ -50,7 +69,7 @@ DEEPAI_BASE_URL = os.environ.get("DEEPAI_BASE_URL", "https://api.deepai.org/api/
 # (below) - without it, purchases succeed on Stripe's side but nobody ever
 # gets credited, so treat it as required, not optional, once real payments
 # are enabled.
-STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "").strip()
+STRIPE_WEBHOOK_SECRET = _key("STRIPE_WEBHOOK_SECRET")
 
 # Two ways to sell the credit pack - set at most one:
 #   1. STRIPE_PAYMENT_LINK - a pre-made, no-code checkout URL from
@@ -68,8 +87,8 @@ STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "").strip()
 # Get either from Stripe test mode first (test-mode Payment Links exist too,
 # and "sk_test_..." keys) to try the whole flow with Stripe's documented
 # test card 4242 4242 4242 4242 before ever going live.
-STRIPE_PAYMENT_LINK = os.environ.get("STRIPE_PAYMENT_LINK", "").strip()
-STRIPE_SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY", "").strip()
+STRIPE_PAYMENT_LINK = _key("STRIPE_PAYMENT_LINK")
+STRIPE_SECRET_KEY = _key("STRIPE_SECRET_KEY")
 
 # The absolute, public URL this app is reachable at - needed because Stripe
 # Checkout requires absolute (not relative) success/cancel URLs. If mounted

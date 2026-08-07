@@ -42,7 +42,7 @@ from urllib.parse import urlparse, parse_qs
 
 from PIL import Image, ImageDraw, ImageFont
 
-from story_engine import config, db, auth, payments, share_page, backend_config, mysql_store
+from story_engine import config, db, auth, payments, share_page, backend_config, mysql_store, api_config
 from story_engine.pipeline import run_job, regenerate_page_image
 from story_engine.book_export import build_zip, get_pdf, pdf_filename
 from story_engine.image_client import ImageGenerationError
@@ -572,6 +572,12 @@ class Handler(BaseHTTPRequestHandler):
                     "migrated": backend_config.is_migrated(),
                     "mysql": backend_config.get_mysql_settings_public(),
                 })
+                return
+
+            if path == "/api/admin/api-keys/status":
+                if not self._require_admin():
+                    return
+                self._send_json({"keys": api_config.get_status()})
                 return
 
             if path == "/api/admin/reports/summary":
@@ -1442,6 +1448,22 @@ class Handler(BaseHTTPRequestHandler):
                         return
                 backend_config.set_backend(target)
                 self._send_json({"ok": True, "backend": target})
+                return
+
+            if path == "/api/admin/api-keys/update":
+                if not self._require_admin():
+                    return
+                body = self._read_json_body()
+                # Only accept keys on the fixed allowlist - api_config.
+                # set_overrides() already filters too, but rejecting here
+                # means a request with an unknown field errors loudly
+                # instead of silently doing nothing with it.
+                unknown = [k for k in body if k not in api_config.EDITABLE_KEYS]
+                if unknown:
+                    self._send_error_json(f"unknown key(s): {', '.join(unknown)}", 400)
+                    return
+                api_config.set_overrides(body)
+                self._send_json({"ok": True, "keys": api_config.get_status()})
                 return
 
             if path == "/api/superadmin/costs":
