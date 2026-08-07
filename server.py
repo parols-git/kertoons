@@ -42,7 +42,7 @@ from urllib.parse import urlparse, parse_qs
 
 from PIL import Image, ImageDraw, ImageFont
 
-from story_engine import config, db, auth, payments, share_page
+from story_engine import config, db, auth, payments, share_page, backend_config, mysql_store
 from story_engine.pipeline import run_job, regenerate_page_image
 from story_engine.book_export import build_zip, get_pdf, pdf_filename
 from story_engine.image_client import ImageGenerationError
@@ -562,6 +562,16 @@ class Handler(BaseHTTPRequestHandler):
                 # actually rendered in the footer (see nav.js), unlike the
                 # other admin tables above which sort newest-first.
                 self._send_json({"footer_links": db.list_footer_links()})
+                return
+
+            if path == "/api/admin/database/status":
+                if not self._require_admin():
+                    return
+                self._send_json({
+                    "backend": backend_config.get_backend(),
+                    "migrated": backend_config.is_migrated(),
+                    "mysql": backend_config.get_mysql_settings_public(),
+                })
                 return
 
             if path == "/api/admin/reports/summary":
@@ -1326,6 +1336,112 @@ class Handler(BaseHTTPRequestHandler):
                 logo_path = os.path.join(config.STATIC_DIR, "logo.png")
                 img.save(logo_path, format="PNG")
                 self._send_json({"ok": True})
+                return
+
+            if path == "/api/admin/database/mysql/test":
+                if not self._require_admin():
+                    return
+                body = self._read_json_body()
+                host = (body.get("host") or "").strip()
+                port = body.get("port") or 3306
+                database = (body.get("database") or "").strip()
+                user = (body.get("user") or "").strip()
+                password = body.get("password") or ""
+                if not host or not database or not user:
+                    self._send_error_json("host, database, and user are required", 400)
+                    return
+                try:
+                    port = int(port)
+                except (TypeError, ValueError):
+                    self._send_error_json("port must be a number", 400)
+                    return
+                ok, message = mysql_store.test_connection(host, port, database, user, password)
+                if not ok:
+                    self._send_error_json(message, 400)
+                    return
+                self._send_json({"ok": True, "message": message})
+                return
+
+            if path == "/api/admin/database/mysql/enable":
+                if not self._require_admin():
+                    return
+                body = self._read_json_body()
+                host = (body.get("host") or "").strip()
+                port = body.get("port") or 3306
+                database = (body.get("database") or "").strip()
+                user = (body.get("user") or "").strip()
+                # A blank password here means "keep the previously-saved
+                # one" (the admin UI never re-displays a saved password, so
+                # re-submitting the form with that field left empty must
+                # not overwrite a real password with an empty string).
+                password = body.get("password")
+                if password is None or password == "":
+                    password = backend_config.get_mysql_settings().get("password", "")
+                if not host or not database or not user:
+                    self._send_error_json("host, database, and user are required", 400)
+                    return
+                try:
+                    port = int(port)
+                except (TypeError, ValueError):
+                    self._send_error_json("port must be a number", 400)
+                    return
+
+                settings = {"host": host, "port": port, "database": database,
+                            "user": user, "password": password}
+                ok, message = mysql_store.test_connection(host, port, database, user, password)
+                if not ok:
+                    self._send_error_json(f"could not connect: {message}", 400)
+                    return
+
+                try:
+                    mysql_store.ensure_schema(settings)
+                except Exception as e:
+                    self._send_error_json(f"could not create database/tables: {e}", 500)
+                    return
+
+                backend_config.set_mysql_settings(host, port, database, user, password)
+
+                migrated_counts = None
+                if not backend_config.is_migrated():
+                    try:
+                        snapshot = db.export_json_snapshot()
+                        mysql_store.migrate_from_json(snapshot)
+                        backend_config.set_migrated()
+                        migrated_counts = {
+                            "users": len(snapshot.get("users", [])),
+                            "stories": len(snapshot.get("stories", [])),
+                            "coupons": len(snapshot.get("coupons", [])),
+                        }
+                    except Exception as e:
+                        self._send_error_json(f"schema created, but migrating existing data failed: {e}", 500)
+                        return
+
+                backend_config.set_backend("mysql")
+                self._send_json({"ok": True, "backend": "mysql", "migrated": migrated_counts})
+                return
+
+            if path == "/api/admin/database/switch":
+                if not self._require_admin():
+                    return
+                body = self._read_json_body()
+                target = body.get("backend")
+                if target not in ("json", "mysql"):
+                    self._send_error_json('backend must be "json" or "mysql"', 400)
+                    return
+                if target == "mysql":
+                    settings = backend_config.get_mysql_settings()
+                    if not settings.get("host") or not settings.get("database"):
+                        self._send_error_json(
+                            "MySQL hasn't been configured yet - use \"Enable MySQL\" first", 400)
+                        return
+                    ok, message = mysql_store.test_connection(
+                        settings["host"], settings["port"], settings["database"],
+                        settings["user"], settings["password"])
+                    if not ok:
+                        self._send_error_json(f"could not connect to the saved MySQL settings: {message}", 400)
+                        return
+                backend_config.set_backend(target)
+                self._send_json({"ok": True, "backend": target})
                 return
 
             if path == "/api/superadmin/costs":

@@ -83,6 +83,28 @@
     </section>
 
     <section class="card">
+      <h2>Database</h2>
+      <p id="database-status" class="hint">Loading current backend...</p>
+
+      <p class="hint">Connect the app to a MySQL database instead of the local JSON file. The database and tables are created automatically, and your existing data is copied in the first time this is enabled.</p>
+      <form id="database-form" class="admin-inline-form">
+        <input type="text" id="database-host" placeholder="Host" required>
+        <input type="number" id="database-port" placeholder="Port" value="3306" min="1" max="65535" required style="width:90px;">
+        <input type="text" id="database-name" placeholder="Database name" required>
+        <input type="text" id="database-user" placeholder="Username" required autocomplete="off">
+        <input type="password" id="database-password" placeholder="Password (leave blank to keep saved)" autocomplete="new-password">
+        <button type="button" class="btn-outline" id="database-test-btn">Test connection</button>
+        <button type="submit" class="btn-secondary">Enable MySQL</button>
+      </form>
+      <div id="database-test-result" class="hint"></div>
+
+      <div id="database-switch-json-wrap" style="display:none; margin-top:14px;">
+        <p class="hint">Currently using MySQL. Your JSON file is untouched, so you can switch back at any time.</p>
+        <button type="button" class="btn-outline" id="database-switch-json-btn">Switch back to JSON file</button>
+      </div>
+    </section>
+
+    <section class="card">
       <h2>Manage</h2>
       <div class="admin-inline-form">
         <a class="btn-secondary" href="admin-users.html">👤 Users</a>

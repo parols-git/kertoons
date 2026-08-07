@@ -21,11 +21,34 @@ import json
 import secrets
 import tempfile
 import threading
+import functools
 from datetime import datetime, timezone
 
 from . import config
+from . import backend_config
+from . import mysql_store
 
 _LOCK = threading.Lock()
+
+
+def _dispatch(func):
+    """Every public function below reads/writes through this - the JSON
+    file or MySQL, whichever backend_config.get_backend() currently says
+    is active (set from the admin Database settings). mysql_store.py
+    implements the exact same function name/signature/return-shape as its
+    JSON counterpart here, so this decorator just picks which
+    implementation actually runs for a given call; every OTHER module in
+    the app (server.py, pipeline.py, ...) keeps calling story_engine.db.*
+    exactly as before and never needs to know or care which backend is
+    live."""
+    name = func.__name__
+
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        if backend_config.get_backend() == "mysql":
+            return getattr(mysql_store, name)(*args, **kwargs)
+        return func(*args, **kwargs)
+    return wrapper
 
 # Every new account starts with this many image-generation credits (see
 # record_image_generation()); pre-existing user records from before this
@@ -109,6 +132,18 @@ def _save(data: dict):
         raise
 
 
+def export_json_snapshot() -> dict:
+    """The JSON file's raw contents, straight off disk - used exactly once,
+    by the admin "Enable MySQL" flow (see mysql_store.migrate_from_json),
+    to copy every existing record into MySQL the first time it's turned on.
+    Deliberately reads the JSON file directly rather than going through the
+    now-dispatched public functions above (which could be pointed at MySQL
+    already) - this is specifically "what does the JSON file currently
+    hold," not "what does the active backend currently hold." """
+    with _LOCK:
+        return _load()
+
+
 def init_db():
     """Create the data file with an empty skeleton if it doesn't exist yet.
     Safe to call on every server startup."""
@@ -132,6 +167,7 @@ def _public_user(user: dict) -> dict:
 
 # ------------------------------------------------------------------- users
 
+@_dispatch
 def create_user(username: str, password_salt: str, password_hash: str, role: str = "user") -> dict:
     """Raises ValueError if the username is already taken (case-insensitive -
     "Mira" and "mira" are the same account). `role` is only ever passed as
@@ -162,6 +198,7 @@ def create_user(username: str, password_salt: str, password_hash: str, role: str
         return _public_user(user)
 
 
+@_dispatch
 def create_admin_if_missing(username: str, password_salt: str, password_hash: str) -> str:
     """Called once at server startup (see server.py's main()) when
     ADMIN_USERNAME/ADMIN_PASSWORD are configured. If a user with that
@@ -204,6 +241,7 @@ def create_admin_if_missing(username: str, password_salt: str, password_hash: st
         return "created"
 
 
+@_dispatch
 def create_superadmin_if_missing(username: str, password_salt: str, password_hash: str) -> str:
     """Same bootstrap pattern as create_admin_if_missing() above, for the
     separate, more-privileged "superadmin" role - see config.py's
@@ -236,6 +274,7 @@ def create_superadmin_if_missing(username: str, password_salt: str, password_has
         return "created"
 
 
+@_dispatch
 def get_user_by_username(username: str) -> dict:
     """Returns the FULL record (including password fields) since this is
     used by the login flow to verify a password - callers that just need a
@@ -248,6 +287,7 @@ def get_user_by_username(username: str) -> dict:
     return None
 
 
+@_dispatch
 def get_user_by_id(user_id: int) -> dict:
     with _LOCK:
         data = _load()
@@ -257,6 +297,7 @@ def get_user_by_id(user_id: int) -> dict:
     return None
 
 
+@_dispatch
 def list_all_users() -> list:
     """Every account (public fields only - no password hash/salt), for the
     admin users table and the CSV export."""
@@ -265,6 +306,7 @@ def list_all_users() -> list:
     return [_public_user(u) for u in data["users"]]
 
 
+@_dispatch
 def set_user_status(user_id: int, status: str) -> bool:
     """status is "active" or "suspended". Returns True if the user was found
     and updated. Suspension is enforced centrally in server.py's
@@ -279,6 +321,7 @@ def set_user_status(user_id: int, status: str) -> bool:
         return True
 
 
+@_dispatch
 def delete_user(user_id: int) -> bool:
     """Removes the user account and any of their sessions. Their stories'
     ownership records are left in place (orphaned) rather than deleted - a
@@ -299,6 +342,7 @@ def delete_user(user_id: int) -> bool:
 
 # ---------------------------------------------------------------- sessions
 
+@_dispatch
 def create_session(user_id: int) -> str:
     token = secrets.token_hex(32)
     with _LOCK:
@@ -308,6 +352,7 @@ def create_session(user_id: int) -> str:
     return token
 
 
+@_dispatch
 def get_user_by_session_token(token: str) -> dict:
     if not token:
         return None
@@ -322,6 +367,7 @@ def get_user_by_session_token(token: str) -> dict:
     return None
 
 
+@_dispatch
 def delete_session(token: str):
     with _LOCK:
         data = _load()
@@ -333,6 +379,7 @@ def delete_session(token: str):
 
 # ----------------------------------------------------------------- stories
 
+@_dispatch
 def create_story_record(job_id: str, user_id: int):
     with _LOCK:
         data = _load()
@@ -350,6 +397,7 @@ def _find_story(data: dict, job_id: str):
     return next((s for s in data["stories"] if s["job_id"] == job_id), None)
 
 
+@_dispatch
 def get_story_record(job_id: str) -> dict:
     with _LOCK:
         data = _load()
@@ -366,6 +414,7 @@ def is_story_published(job_id: str) -> bool:
     return bool(record and record["published"])
 
 
+@_dispatch
 def set_story_published(job_id: str, published: bool) -> bool:
     """Returns True if a matching story record was found and updated."""
     with _LOCK:
@@ -378,6 +427,7 @@ def set_story_published(job_id: str, published: bool) -> bool:
         return True
 
 
+@_dispatch
 def increment_story_view_count(job_id: str) -> int:
     """Bumps job_id's view counter by one and returns the new total (0 if no
     matching record exists - shouldn't happen since the caller, GET
@@ -398,6 +448,7 @@ def increment_story_view_count(job_id: str) -> int:
         return record["view_count"]
 
 
+@_dispatch
 def delete_story_record(job_id: str) -> bool:
     """Removes the ownership/publish record for job_id. Returns True if a
     matching record was found and removed. Ownership is checked by the
@@ -414,18 +465,21 @@ def delete_story_record(job_id: str) -> bool:
         return True
 
 
+@_dispatch
 def list_published_stories() -> list:
     with _LOCK:
         data = _load()
     return [s for s in data["stories"] if s["published"]]
 
 
+@_dispatch
 def list_stories_for_user(user_id: int) -> list:
     with _LOCK:
         data = _load()
     return [s for s in data["stories"] if s["user_id"] == user_id]
 
 
+@_dispatch
 def list_all_stories() -> list:
     """Every story ownership/publish record across every user, each annotated
     with the owner's username (or None if the owner account was since
@@ -444,6 +498,7 @@ def list_all_stories() -> list:
 
 # ------------------------------------------------------------- image usage
 
+@_dispatch
 def get_image_credits(user_id: int) -> int:
     with _LOCK:
         data = _load()
@@ -451,6 +506,7 @@ def get_image_credits(user_id: int) -> int:
     return user.get("image_credits", DEFAULT_IMAGE_CREDITS) if user else 0
 
 
+@_dispatch
 def record_image_generation(user_id: int, job_id: str, page_number: int,
                              prompt: str, image_url: str) -> int:
     """Called once per image actually generated (both a story's initial 5
@@ -481,6 +537,7 @@ def record_image_generation(user_id: int, job_id: str, page_number: int,
         return user["image_credits"] if user is not None else 0
 
 
+@_dispatch
 def add_credits(user_id: int, amount: int) -> int:
     """Adds `amount` credits to the user's balance, unconditionally - the
     MOCK-PAYMENTS "Add credits" top-up used when no Stripe key is configured
@@ -498,6 +555,7 @@ def add_credits(user_id: int, amount: int) -> int:
         return user["image_credits"]
 
 
+@_dispatch
 def grant_credits_for_payment(user_id: int, session_id: str, credits: int,
                                amount_usd: float = None) -> int:
     """Idempotently grants `credits` for a specific, already-verified Stripe
@@ -528,18 +586,21 @@ def grant_credits_for_payment(user_id: int, session_id: str, credits: int,
         return user["image_credits"]
 
 
+@_dispatch
 def list_payments_for_user(user_id: int) -> list:
     with _LOCK:
         data = _load()
     return [p for p in data.get("processed_payments", []) if p.get("user_id") == user_id]
 
 
+@_dispatch
 def list_image_usage_for_user(user_id: int) -> list:
     with _LOCK:
         data = _load()
     return [u for u in data.get("image_usage", []) if u["user_id"] == user_id]
 
 
+@_dispatch
 def list_all_image_usage() -> list:
     """Every image generated across every user (initial pages AND
     "Regenerate image" clicks alike) - for the admin's monthly image-volume
@@ -549,6 +610,7 @@ def list_all_image_usage() -> list:
     return list(data.get("image_usage", []))
 
 
+@_dispatch
 def list_all_payments() -> list:
     """Every processed payment across every user, annotated with the payer's
     username (or None if since deleted) - for the admin purchase summary
@@ -566,6 +628,7 @@ def list_all_payments() -> list:
 
 # ----------------------------------------------------------------- coupons
 
+@_dispatch
 def create_coupon(code: str, credits: int) -> dict:
     """Raises ValueError if the code is already taken (case-insensitive, same
     convention as usernames). New coupons start active."""
@@ -585,6 +648,7 @@ def create_coupon(code: str, credits: int) -> dict:
         return coupon
 
 
+@_dispatch
 def list_coupons() -> list:
     with _LOCK:
         data = _load()
@@ -595,6 +659,7 @@ def _find_coupon(data: dict, code: str):
     return next((c for c in data.get("coupons", []) if c["code"].lower() == code.lower()), None)
 
 
+@_dispatch
 def set_coupon_active(code: str, active: bool) -> bool:
     """Returns True if a matching coupon was found and updated."""
     with _LOCK:
@@ -607,6 +672,7 @@ def set_coupon_active(code: str, active: bool) -> bool:
         return True
 
 
+@_dispatch
 def redeem_coupon(code: str, user_id: int) -> int:
     """Redeems `code` for user_id: grants its credits and records the
     redemption, in one locked operation so a duplicate redemption can never
@@ -643,6 +709,7 @@ def redeem_coupon(code: str, user_id: int) -> int:
         return user["image_credits"]
 
 
+@_dispatch
 def list_coupon_redemptions() -> list:
     """Every redemption across every coupon/user - for the admin report's
     per-coupon redemption counts."""
@@ -653,6 +720,7 @@ def list_coupon_redemptions() -> list:
 
 # ----------------------------------------------------------- footer links
 
+@_dispatch
 def list_footer_links() -> list:
     """Admin-added extra footer links (e.g. "Terms", "Privacy Policy"),
     shown after FAQ/Help on every page - see static/nav.js's
@@ -665,6 +733,7 @@ def list_footer_links() -> list:
     return list(data.get("footer_links", []))
 
 
+@_dispatch
 def add_footer_link(name: str, url: str, new_tab: bool) -> dict:
     with _LOCK:
         data = _load()
@@ -681,6 +750,7 @@ def add_footer_link(name: str, url: str, new_tab: bool) -> dict:
         return link
 
 
+@_dispatch
 def delete_footer_link(link_id: int) -> bool:
     """Returns True if a matching link was found and removed."""
     with _LOCK:
@@ -696,6 +766,7 @@ def delete_footer_link(link_id: int) -> bool:
 
 # ---------------------------------------------------------- site settings
 
+@_dispatch
 def get_site_settings() -> dict:
     """Admin-configurable branding - site display name, the trailing footer
     message, optional contact info, how many scenes/pages each new story
@@ -720,6 +791,7 @@ def get_site_settings() -> dict:
     }
 
 
+@_dispatch
 def set_site_settings(site_name: str, footer_text: str, contact_email: str = "",
                        contact_phone: str = "", page_count: int = None,
                        signup_credits: int = None) -> dict:
@@ -749,6 +821,7 @@ def set_site_settings(site_name: str, footer_text: str, contact_email: str = "",
 # visitor via the public GET /api/config, and these numbers must never be
 # reachable that way.
 
+@_dispatch
 def get_cost_settings() -> dict:
     with _LOCK:
         data = _load()
@@ -759,6 +832,7 @@ def get_cost_settings() -> dict:
     }
 
 
+@_dispatch
 def set_cost_settings(cost_per_image: float, server_fee: float) -> dict:
     with _LOCK:
         data = _load()

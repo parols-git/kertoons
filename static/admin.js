@@ -208,6 +208,99 @@ async function loadSettings() {
   }
 }
 
+// -------------------------------------------------------------- database
+
+async function loadDatabaseStatus() {
+  try {
+    const res = await fetch("api/admin/database/status");
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Failed to load database status");
+
+    const usingMysql = data.backend === "mysql";
+    document.getElementById("database-status").innerHTML = usingMysql
+      ? `Currently using <strong>MySQL</strong> (<code>${_adminEscapeHtml(data.mysql.database)}</code> on ${_adminEscapeHtml(data.mysql.host)}).`
+      : `Currently using the local <strong>JSON file</strong>.`;
+    document.getElementById("database-switch-json-wrap").style.display = usingMysql ? "block" : "none";
+
+    // Prefill the form with whatever's already saved (password stays
+    // masked/blank - see server.py's /api/admin/database/mysql/enable,
+    // which keeps the existing saved password when this field is left
+    // blank on re-submit).
+    document.getElementById("database-host").value = data.mysql.host || "";
+    document.getElementById("database-port").value = data.mysql.port || 3306;
+    document.getElementById("database-name").value = data.mysql.database || "";
+    document.getElementById("database-user").value = data.mysql.user || "";
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+function _databaseFormValues() {
+  return {
+    host: document.getElementById("database-host").value.trim(),
+    port: parseInt(document.getElementById("database-port").value, 10) || 3306,
+    database: document.getElementById("database-name").value.trim(),
+    user: document.getElementById("database-user").value.trim(),
+    password: document.getElementById("database-password").value,
+  };
+}
+
+document.getElementById("database-test-btn").addEventListener("click", async () => {
+  const resultEl = document.getElementById("database-test-result");
+  resultEl.textContent = "Testing...";
+  try {
+    const res = await fetch("api/admin/database/mysql/test", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(_databaseFormValues()),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Connection failed");
+    resultEl.textContent = `✅ ${data.message}`;
+  } catch (e) {
+    resultEl.textContent = `❌ ${e.message}`;
+  }
+});
+
+document.getElementById("database-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  if (!confirm(
+    "This creates the database/tables on the MySQL server if needed, copies your existing " +
+    "data in (first time only), and switches the app to read/write MySQL from now on. Continue?"
+  )) return;
+  try {
+    const res = await fetch("api/admin/database/mysql/enable", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(_databaseFormValues()),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Failed to enable MySQL");
+    document.getElementById("database-password").value = "";
+    const migratedNote = data.migrated
+      ? ` Migrated ${data.migrated.users} users, ${data.migrated.stories} stories, ${data.migrated.coupons} coupons.`
+      : "";
+    _adminShowBanner(`Now using MySQL.${migratedNote}`, "success");
+    loadDatabaseStatus();
+  } catch (e) {
+    alert(e.message);
+  }
+});
+
+document.getElementById("database-switch-json-btn").addEventListener("click", async () => {
+  if (!confirm("Switch back to the local JSON file? MySQL data is left as-is - you can switch back later.")) return;
+  try {
+    const res = await fetch("api/admin/database/switch", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ backend: "json" }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Failed to switch backend");
+    _adminShowBanner("Switched back to the JSON file.", "success");
+    loadDatabaseStatus();
+  } catch (e) {
+    alert(e.message);
+  }
+});
+
 // -------------------------------------------------------------- reports
 
 async function loadReports() {
@@ -457,6 +550,7 @@ function _isAdminRole(role) {
   }
   document.getElementById("admin-panel").style.display = "block";
   loadSettings();
+  loadDatabaseStatus();
   loadCoupons();
   loadFooterLinks();
   loadReports();

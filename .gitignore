@@ -5,6 +5,11 @@
 # runtime data, not source.
 kertoons_data.json
 
+# Which storage backend is active (JSON file or MySQL) plus, if MySQL has
+# ever been configured, its host/user/PASSWORD in plaintext - real secrets,
+# never commit. See story_engine/backend_config.py.
+kertoons_backend.json
+
 # Generated stories (images, PDFs, ZIPs) - user content, not source, and
 # large. Keep the directory tracked but not its contents.
 generated/*
