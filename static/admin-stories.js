@@ -84,21 +84,23 @@ function renderStoriesPage() {
 
   const rowsHtml = pageItems.map(s => `
     <tr>
-      <td>${s.ready ? `<a href="story.html?job_id=${s.job_id}">${_escapeHtml(s.title)}</a>` : `<em>generating...</em>`}</td>
+      <td>
+        <div>${s.ready ? `<a href="story.html?job_id=${s.job_id}">${_escapeHtml(s.title)}</a>` : `<em>generating...</em>`}</div>
+        <div class="admin-row-actions">
+          <button type="button" class="btn-outline btn-admin-row" onclick="toggleStoryPublish('${s.job_id}', ${!s.published})">${s.published ? "Unpublish" : "Publish"}</button>
+          <button type="button" class="btn-outline btn-admin-row" onclick="deleteStory('${s.job_id}')">Delete</button>
+        </div>
+      </td>
       <td>${_escapeHtml(s.owner_username || "(deleted user)")}</td>
       <td><span class="status-badge ${s.published ? "published" : "unpublished"}">${s.published ? "published" : "unpublished"}</span></td>
       <td>${s.view_count || 0}</td>
       <td class="usage-date">${_escapeHtml(_fmtDate(s.created_at))}</td>
-      <td>
-        <button type="button" class="btn-outline btn-admin-row" onclick="toggleStoryPublish('${s.job_id}', ${!s.published})">${s.published ? "Unpublish" : "Publish"}</button>
-        <button type="button" class="btn-outline btn-admin-row" onclick="deleteStory('${s.job_id}')">Delete</button>
-      </td>
     </tr>`
   ).join("");
 
   wrap.innerHTML = `
     <table class="usage-table">
-      <thead><tr><th>Title</th><th>Owner</th><th>Status</th><th>Views</th><th>Created</th><th>Actions</th></tr></thead>
+      <thead><tr><th>Title</th><th>Owner</th><th>Status</th><th>Views</th><th>Created</th></tr></thead>
       <tbody>${rowsHtml}</tbody>
     </table>
     ${_numberedPaginationHtml(storiesData.length, storiesPage, STORIES_PAGE_SIZE, "goToStoriesPage")}
