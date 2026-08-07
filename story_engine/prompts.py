@@ -103,6 +103,13 @@ story text explicitly narrates a costume or clothing change (e.g. "she put on he
 - A prop that appears in one scene (a rocket on a table, goggles found in a box, a kite) must \
 stay a scene prop, not silently become something a character is wearing or holding in later \
 pages, unless it was listed in that character's fixed "accessories" from the start.
+- NEVER let one character's fixed traits (hair color/style, skin/fur tone, outfit colors, \
+accessories) bleed onto a different character, even within the same scene - each character's \
+5-slot description is exclusively theirs. When a scene has 2+ characters, deliberately choose \
+visually DISTINCT hair colors, outfit colors, and skin/fur tones between them at character-\
+creation time specifically so an image model has no ambiguity about which traits belong to \
+whom - two characters who are hard to tell apart by silhouette/color alone are far more likely \
+to have their features mixed up by the image generator than two who look obviously different.
 - Do not introduce new named characters mid-story unless clearly defined up front.
 - CAREFULLY decide, scene by scene, exactly which characters are actually present and active \
 in that specific page - do not put every main character on every page. A character should \
@@ -153,15 +160,18 @@ illustrations page to page.
 IMAGE PROMPT FORMAT (use this template for every page's "image_prompt" field, using only the \
 characters in that page's "characters_present" - and apply the same variety rules above to \
 "panel_visual" too, since that is the field actually used to generate the illustration):
-"PIXAR 3D cartoon style, [only the characters_present, with full fixed appearance details in the 5-slot \
-order: skin/fur tone, hair, face, outfit colors, accessories] [each character's specific pose/\
-action for THIS instant - distinct from every other page], [this page's specific setting/\
-location detail - distinct from every other page], with [background elements/scenery specific \
-to this spot], [this page's camera framing/shot type], [this page's lighting/time-of-day], \
-kid-safe soft colors. Exact same face, hairstyle, and outfit colors as previously established \
-for each character - no new accessories, hats, goggles, or props added to their body that \
-weren't in their fixed appearance - but pose, setting, background, framing, and lighting must \
-all be unique to this page."
+"PIXAR 3D cartoon style. CHARACTER 1: [name], [full fixed appearance in the 5-slot order: skin/\
+fur tone, hair, face, outfit colors, accessories], [this character's specific pose/action for \
+THIS instant]. CHARACTER 2 (if present): [name], [full fixed appearance in the same 5-slot \
+order - DO NOT reuse or blend any color/trait from CHARACTER 1's description], [this \
+character's specific pose/action]. (Repeat numbered per character actually in characters_present.) \
+Setting: [this page's specific spot/location, distinct from every other page], with \
+[background elements/scenery specific to this spot], [this page's camera framing/shot type], \
+[this page's lighting/time-of-day], kid-safe soft colors. Exact same face, hairstyle, and \
+outfit colors as previously established for EACH character - never swap or mix any character's \
+hair color, outfit color, or accessories onto a different character in this scene, and add no \
+new accessories, hats, goggles, ears, or props onto anyone's body that weren't in their fixed \
+appearance - but pose, setting, background, framing, and lighting must all be unique to this page."
 
 OUTPUT FORMAT:
 Respond with ONLY a single JSON object (no markdown fences, no commentary) matching exactly \
@@ -249,15 +259,37 @@ def build_character_prompt_block(characters: list) -> str:
     """Deterministically assembled in code (never re-authored by the LLM per
     page), so the exact same character-description text is reused for every
     single image prompt - the fixed anchor that page-to-page consistency is
-    built on. See image_client.py for how this is combined with the actual
-    first generated image as a visual reference too."""
+    built on.
+
+    Each character gets its own numbered "CHARACTER N" slot rather than a
+    flat pipe-separated list - image models attribute traits far more
+    reliably to the right character when the prompt makes each one a
+    visually distinct, separately-labeled block, instead of one run-on
+    description the model has to parse apart itself (the likely cause of
+    real observed failures like one character's hair color or outfit
+    silently appearing on a different character in the same scene).
+
+    Personality (e.g. "curious and adventurous") is deliberately left out -
+    it has no fixed visual meaning, just spends prompt budget the 5-slot
+    appearance description needs more, and specific personality words can
+    even bias the image toward an inconsistent expression/pose that should
+    instead be driven by that page's own scene text."""
     parts = []
-    for c in characters:
+    for i, c in enumerate(characters, start=1):
+        char_type = c.get("type", "character")
+        article = "an" if char_type[:1].lower() in "aeiou" else "a"
         parts.append(
-            f'{c.get("name","")} (a {c.get("type","character")}): {c.get("appearance","")}, '
-            f'personality: {c.get("personality","")}'
+            f'CHARACTER {i} - {c.get("name","")} ({article} {char_type}): '
+            f'{c.get("appearance","")}'
         )
-    return " | ".join(parts)
+    block = ". ".join(parts)
+    if len(characters) > 1:
+        block += (
+            ". These are visually distinct individuals - never let one character's hair "
+            "color, skin/fur tone, outfit colors, or accessories appear on a different "
+            "character in this scene"
+        )
+    return block
 
 
 VISION_SYSTEM_PROMPT = """You describe a child's uploaded photo as a warm, generic, \
@@ -266,3 +298,30 @@ Never identify or guess the real child's identity, age, name, or location. Descr
 general, respectful, cartoon-friendly visual traits (hair color/style, favorite-color-coded \
 outfit idea, general vibe/personality suggestion) suitable for turning into a PIXAR-style \
 3D cartoon character. Respond with one short paragraph only."""
+
+
+# Used by image_client.py's generate-then-verify-then-retry loop (see
+# openai_client.verify_scene_image) - a cheap, best-effort quality gate that
+# catches the specific failure mode plain text2img is prone to: a character
+# rendered with the WRONG fixed traits, or one character's traits bleeding
+# onto another in a multi-character scene. Deliberately narrow in scope
+# (only the fixed, objective traits every character's "appearance" field
+# locks down) rather than general art-quality judgment, which would be far
+# too subjective to act on automatically.
+IMAGE_CONSISTENCY_CHECK_PROMPT = """You are a strict continuity checker for a children's \
+picture book's illustrations. You will be given the FIXED, locked appearance description for \
+one or more characters and a single generated image. For EACH character listed, check whether \
+the image shows that specific character (if present at all) with exactly their described \
+skin/fur tone, hair color and style, and outfit colors - and that none of their traits appear \
+on a DIFFERENT character in the same image instead.
+
+Respond with ONLY a single JSON object, no markdown fences, no commentary:
+{"consistent": true|false, "issues": ["short specific description of each mismatch found, e.g. \
+'Ziggy's green hair appears purple/black instead' or 'the alien character is wearing the kid \
+character's orange outfit'"]}
+
+If every character's traits match their fixed description and no traits are mixed up between \
+characters, return {"consistent": true, "issues": []}. Only flag real, clearly visible \
+mismatches in the FIXED traits (skin/fur tone, hair color/style, outfit colors, accessories) - \
+never flag pose, expression, camera angle, background, or lighting, since those are SUPPOSED to \
+vary page to page."""

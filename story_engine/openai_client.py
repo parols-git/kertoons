@@ -19,6 +19,7 @@ from .api_utils import StoryGenerationError, post_with_retry
 from .prompts import (
     build_system_prompt, build_user_prompt, VISION_SYSTEM_PROMPT,
     TRANSLATE_SYSTEM_PROMPT, build_translate_user_prompt,
+    IMAGE_CONSISTENCY_CHECK_PROMPT,
 )
 
 OPENAI_CHAT_URL = "https://api.openai.com/v1/chat/completions"
@@ -287,3 +288,54 @@ def describe_character_photo(image_bytes: bytes, mime_type: str = "image/png") -
         return resp.json()["choices"][0]["message"]["content"].strip()
 
     return post_with_retry(OPENAI_CHAT_URL, headers, payload, 60, parse, service_name="OpenAI")
+
+
+def verify_scene_image(image_bytes: bytes, character_block: str, mime_type: str = "image/png") -> dict:
+    """Asks a vision-capable model whether the generated image actually
+    shows each character with their own fixed traits (see
+    prompts.IMAGE_CONSISTENCY_CHECK_PROMPT) - the automated half of
+    image_client.py's generate-then-verify-then-retry loop, which exists
+    because a plain text2img call has no reliable way to GUARANTEE the
+    prompt's character-fidelity instructions were actually followed, only
+    to ask nicely for it. Returns {"consistent": bool, "issues": [str]}.
+
+    Best-effort: mock mode returns a trivially-passing result (nothing to
+    verify against without a real character_block-following image engine
+    in the first place), and any real API failure here also returns a
+    passing result rather than raising - a broken verifier should never be
+    able to block story generation outright, only skip the extra safety
+    net it adds."""
+    if config.MOCK_STORY or not config.OPENAI_API_KEY:
+        return {"consistent": True, "issues": []}
+    try:
+        b64 = base64.b64encode(image_bytes).decode("ascii")
+        messages = [
+            {"role": "system", "content": IMAGE_CONSISTENCY_CHECK_PROMPT},
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": f"Fixed character descriptions:\n{character_block}"},
+                    {"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{b64}"}},
+                ],
+            },
+        ]
+        headers = {
+            "Authorization": f"Bearer {config.OPENAI_API_KEY}",
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "model": config.OPENAI_MODEL, "messages": messages,
+            "temperature": 0, "response_format": {"type": "json_object"},
+        }
+
+        def parse(resp):
+            return json.loads(resp.json()["choices"][0]["message"]["content"])
+
+        result = post_with_retry(OPENAI_CHAT_URL, headers, payload, 30, parse, service_name="OpenAI")
+        return {
+            "consistent": bool(result.get("consistent", True)),
+            "issues": list(result.get("issues") or []),
+        }
+    except Exception as e:
+        print(f"[kertoons] image consistency check failed (treating as passed): {e}")
+        return {"consistent": True, "issues": []}

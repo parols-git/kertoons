@@ -52,7 +52,7 @@ import hashlib
 import requests
 from PIL import Image, ImageDraw, ImageFont
 
-from . import config, db
+from . import config, db, openai_client
 
 
 class ImageGenerationError(Exception):
@@ -237,19 +237,26 @@ def build_prompt(character_block: str, scene_text: str, region: str,
 
     core = f"PIXAR 3D cartoon style, {character_block}. Setting: {region}. Scene: {scene_text}."
 
+    # Character-fidelity instructions come FIRST in the boilerplate (before
+    # the pose/framing variety ones) - if a large cast forces truncation
+    # below, it trims from the END, and getting a character's face/colors
+    # wrong is a worse failure than a slightly less varied camera angle.
     boilerplate = (
+        f"Each character's appearance must exactly match ONLY their own fixed description "
+        f"above (the CHARACTER N slot with their name) - identical face, eye color, hairstyle, "
+        f"hair color, skin/fur tone, and outfit colors every time. NEVER swap, blend, or copy "
+        f"any trait (hair color/style, skin/fur tone, outfit color, ears, accessories) from one "
+        f"character onto a different character in this scene, even when they're standing close "
+        f"together - each one keeps only their own listed traits. Do NOT add any accessories, "
+        f"glasses, hats, goggles, bows, or props onto a character's body that aren't part of "
+        f"their own fixed appearance above, even if similar objects appear elsewhere in the "
+        f"scene. Kid-safe soft pastel colors."
         f"{uniqueness_clause} "
         f"This illustration must look STRIKINGLY, OBVIOUSLY different from every other page in "
         f"this book at a glance - a different pose and action for each character, a different "
         f"camera framing/shot type, a different specific spot, different background scenery, "
         f"and different lighting, all matching the scene description above. Never a generic or "
-        f"repeated composition. "
-        f"Each character's appearance must exactly match their fixed description above - "
-        f"identical faces, eye color, hairstyle, hair color, skin/fur tone, and outfit colors "
-        f"every time. Do NOT add any accessories, glasses, hats, goggles, bows, or props onto a "
-        f"character's body that aren't part of their fixed appearance above, even if similar "
-        f"objects appear elsewhere in the scene. "
-        f"Kid-safe soft pastel colors."
+        f"repeated composition."
     )
 
     # +1 for the space joining core and boilerplate.
@@ -320,13 +327,55 @@ def generate_scene_image(character_block: str, scene_text: str, region: str = ""
     last_error = None
     for attempt in range(MAX_PROMPT_ADJUST_ATTEMPTS):
         try:
-            return _add_watermark(_deepai_image(prompt), watermark_text), prompt
+            image_bytes = _deepai_image(prompt)
+            image_bytes, prompt = _verify_and_maybe_retry(image_bytes, prompt, character_block)
+            return _add_watermark(image_bytes, watermark_text), prompt
         except UnsafeContentError as e:
             print(f"[kertoons] image prompt flagged unsafe (attempt {attempt + 1}/"
                   f"{MAX_PROMPT_ADJUST_ATTEMPTS}), retrying with an adjusted prompt: {e}")
             last_error = e
             prompt = _soften_prompt(character_block, scene_text, region, attempt + 1)
     raise last_error
+
+
+def _verify_and_maybe_retry(image_bytes: bytes, prompt: str, character_block: str) -> tuple:
+    """Generate-then-verify-then-retry: a plain text2img call can only be
+    ASKED to keep every character's fixed traits straight (see
+    build_prompt's boilerplate); this is the check that something actually
+    listened, using the same vision model already available for character-
+    photo description (see openai_client.verify_scene_image). One retry
+    only - not a loop until it passes, since each retry costs a real image
+    generation call and there's no guarantee a second attempt fixes what
+    the first got wrong; if the retry doesn't verify clean either, its
+    result is used anyway (the retry's amended prompt is at least no worse
+    than the original) rather than looping indefinitely on the API's dime.
+
+    Controlled by config.IMAGE_CONSISTENCY_CHECK (on by default whenever
+    OPENAI_API_KEY is set - verify_scene_image() itself already no-ops to
+    an always-passing result without one, so this flag exists purely so an
+    admin can turn the extra vision-API cost/latency off explicitly)."""
+    if not config.IMAGE_CONSISTENCY_CHECK:
+        return image_bytes, prompt
+    verdict = openai_client.verify_scene_image(image_bytes, character_block)
+    if verdict["consistent"]:
+        return image_bytes, prompt
+
+    issues = "; ".join(verdict["issues"]) or "a character's fixed traits did not match"
+    print(f"[kertoons] image consistency check flagged an issue, retrying once: {issues}")
+    corrected_prompt = _truncate(
+        f"{prompt} IMPORTANT CORRECTION - a previous attempt got this wrong: {issues}. "
+        f"Do not repeat that mistake: give each character exactly their own listed hair "
+        f"color, skin/fur tone, and outfit colors, with nothing swapped between characters.",
+        MAX_IMAGE_PROMPT_LEN,
+    )
+    try:
+        retry_bytes = _deepai_image(corrected_prompt)
+        return retry_bytes, corrected_prompt
+    except ImageGenerationError as e:
+        # The original image at least generated successfully - keep it
+        # rather than failing the whole page over a best-effort retry.
+        print(f"[kertoons] consistency-check retry generation failed, keeping original image: {e}")
+        return image_bytes, prompt
 
 
 # ------------------------------------------------------------- real DeepAI

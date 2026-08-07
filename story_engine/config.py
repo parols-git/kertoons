@@ -101,6 +101,17 @@ PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "").strip()
 # Force mock mode regardless of keys (useful for local testing/demo)
 FORCE_MOCK = os.environ.get("FORCE_MOCK", "").strip().lower() in ("1", "true", "yes")
 
+# On by default - after generating a page's image, a vision model checks
+# whether every character actually kept their own fixed hair/skin/outfit
+# traits (no bleeding onto a different character in the scene) and, if not,
+# retries once with an amended prompt - see image_client._verify_and_maybe_
+# retry(). Costs one extra vision-API call per page (two if a retry fires),
+# so it's here as an explicit off switch for cost/latency reasons; it's
+# otherwise a no-op without OPENAI_API_KEY regardless of this setting.
+IMAGE_CONSISTENCY_CHECK = os.environ.get("IMAGE_CONSISTENCY_CHECK", "1").strip().lower() not in (
+    "0", "false", "no",
+)
+
 MOCK_STORY = FORCE_MOCK or not OPENAI_API_KEY
 MOCK_TRANSLATION = FORCE_MOCK or not (
     GEMINI_API_KEY if TRANSLATION_PROVIDER == "gemini" else OPENAI_API_KEY
