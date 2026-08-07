@@ -87,8 +87,18 @@ vague or unstated, because a vague or missing slot is exactly where an image mod
 random, inconsistent detail on some pages and not others:
   1. Skin/fur/feather tone - exact wording (e.g. "warm brown skin", "orange fur with a white \
 belly", never just "a kid" or "an animal").
-  2. Hair (or fur/feather pattern for animals) - exact color, length, and style (e.g. "black \
-hair in two short puffs", "short straight brown hair with a side part").
+  2. Hair (or fur/feather pattern for animals) - hairstyle is the single most common thing an \
+image model gets inconsistent page to page, so lock down all FOUR of these as their own \
+distinct words, always in this order, never merged into one vague phrase: (a) LENGTH - e.g. \
+"chin-length", "shoulder-length", "waist-length", "short" (for animals: fur/feather length); \
+(b) TEXTURE - e.g. "tightly curled", "loosely wavy", "poker-straight", "spiky" (never just \
+"curly hair" alone - say how curly); (c) STYLING - how it's worn/parted/tied, e.g. "worn loose", \
+"in two puffs", "in a side ponytail", "with a straight side part", "swept back" (never leave \
+this out - "styling: worn loose" if genuinely nothing else); (d) COLOR - the exact shade, e.g. \
+"deep violet-purple", "jet black", "forest green" (a one-word basic color like "purple" alone \
+is too vague - describe the specific shade). Example of the full slot done right: "shoulder-\
+length, loosely wavy, worn loose, deep violet-purple hair" - NOT "purple hair" or "curly purple \
+hair" (both missing required sub-parts).
   3. Face - eye color plus exactly one fixed distinguishing feature (e.g. "brown eyes, round \
 glasses" or "green eyes, a small star-shaped freckle under one eye").
   4. Outfit - the exact garment type(s) and exact color(s) for each, e.g. "a bright yellow \
@@ -311,17 +321,31 @@ outfit idea, general vibe/personality suggestion) suitable for turning into a PI
 IMAGE_CONSISTENCY_CHECK_PROMPT = """You are a strict continuity checker for a children's \
 picture book's illustrations. You will be given the FIXED, locked appearance description for \
 one or more characters and a single generated image. For EACH character listed, check whether \
-the image shows that specific character (if present at all) with exactly their described \
-skin/fur tone, hair color and style, and outfit colors - and that none of their traits appear \
-on a DIFFERENT character in the same image instead.
+the image shows that specific character (if present at all) with exactly their described traits \
+- and that none of their traits appear on a DIFFERENT character in the same image instead.
+
+Check hairSTYLE and hair COLOR as two SEPARATE checks, not one - hairstyle drifting (even with \
+the right color) is the single most common mistake, so look closely at it on its own:
+- Hair LENGTH: does it match (e.g. don't accept shoulder-length hair when "waist-length" was \
+specified, or short fur when "long fur" was specified)?
+- Hair TEXTURE: does it match (e.g. don't accept straight or loosely-wavy hair when "tightly \
+curled" was specified, or the reverse)?
+- Hair STYLING: does it match how it's worn (e.g. don't accept hair worn loose when "in two \
+puffs" or "in a side ponytail" was specified)?
+- Hair COLOR: does the shade match (not just "is it roughly the right color family")?
+A character whose hair color is correct but whose length, texture, or styling is wrong is STILL \
+a consistency failure - flag it specifically (e.g. "Luna's hair is the right purple but is short \
+and straight here instead of long and curly").
+
+Also check skin/fur tone, outfit colors, and accessories the same way, and that no character's \
+traits appear on a different character.
 
 Respond with ONLY a single JSON object, no markdown fences, no commentary:
 {"consistent": true|false, "issues": ["short specific description of each mismatch found, e.g. \
-'Ziggy's green hair appears purple/black instead' or 'the alien character is wearing the kid \
-character's orange outfit'"]}
+'Ziggy's hair is short and straight here instead of the fixed short spiky style' or 'the alien \
+character is wearing the kid character's orange outfit'"]}
 
-If every character's traits match their fixed description and no traits are mixed up between \
-characters, return {"consistent": true, "issues": []}. Only flag real, clearly visible \
-mismatches in the FIXED traits (skin/fur tone, hair color/style, outfit colors, accessories) - \
-never flag pose, expression, camera angle, background, or lighting, since those are SUPPOSED to \
-vary page to page."""
+If every character's traits (including hair length/texture/styling, not just color) match their \
+fixed description and no traits are mixed up between characters, return {"consistent": true, \
+"issues": []}. Only flag real, clearly visible mismatches in the FIXED traits - never flag pose, \
+expression, camera angle, background, or lighting, since those are SUPPOSED to vary page to page."""

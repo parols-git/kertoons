@@ -241,7 +241,17 @@ def build_prompt(character_block: str, scene_text: str, region: str,
     # the pose/framing variety ones) - if a large cast forces truncation
     # below, it trims from the END, and getting a character's face/colors
     # wrong is a worse failure than a slightly less varied camera angle.
+    # Hairstyle gets its OWN sentence, ahead of the general fidelity one -
+    # in practice it's the single most common thing that drifts page to
+    # page (length, curl/texture, and styling silently changing even when
+    # the color is right), so it needs standalone emphasis rather than
+    # being just one word in a longer list the model can skim past.
     boilerplate = (
+        f"HAIRSTYLE IS CRITICAL: each character's hair length, texture (straight/wavy/curly/"
+        f"spiky), how it's styled/worn, AND color must all stay EXACTLY as fixed above on every "
+        f"single page - this is the detail that drifts most, so double-check it specifically "
+        f"before finalizing: does the hair length, curl pattern, and styling in this image match "
+        f"their fixed description word for word, not just the color? "
         f"Each character's appearance must exactly match ONLY their own fixed description "
         f"above (the CHARACTER N slot with their name) - identical face, eye color, hairstyle, "
         f"hair color, skin/fur tone, and outfit colors every time. NEVER swap, blend, or copy "
