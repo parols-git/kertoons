@@ -1,10 +1,12 @@
 """
-MySQL-backed implementation of every function db.py exposes - a drop-in
-alternative to the JSON-file store, selected at runtime via
-backend_config.get_backend(). Every function here has the exact same name,
-signature, and return shape as its story_engine.db counterpart, so db.py's
-public functions can dispatch to either one without callers (server.py,
-pipeline.py, etc.) ever needing to know which backend is active.
+The app's real, only data store - db.py re-exports every function here
+under the same name, so every caller (server.py, pipeline.py, etc.) keeps
+calling story_engine.db.* without needing to know MySQL is what's actually
+answering. This used to be one of two interchangeable backends (a JSON
+file was the other, switchable at runtime); that design was removed after
+it caused a production incident (a table added here could exist without
+ever being created in the live database, or the reverse), so this is now
+the single source of truth, unconditionally.
 
 Pooled connections, not connect-per-call: a single page view like GET
 /api/story/view touches the database half a dozen times (ownership check,
@@ -20,8 +22,8 @@ Uniqueness/case-insensitivity: the database is created with
 utf8mb4_unicode_ci collation (see ensure_schema below), which is
 case-insensitive for comparisons AND uniqueness constraints - so a UNIQUE
 KEY on `username` or a PRIMARY KEY on `code` already treats "Mira"/"mira" or
-"SAVE10"/"save10" as the same value, matching db.py's manual
-`.lower() == .lower()` checks without needing to replicate that logic here.
+"SAVE10"/"save10" as the same value without any extra `.lower()` handling
+needed in the query logic below.
 """
 import secrets
 import threading
@@ -1390,184 +1392,3 @@ def set_entry_certificates(entry_id: int, participation_path: str, winner_path: 
     finally:
         conn.close()
 
-
-# --------------------------------------------------------------- migration
-
-def migrate_from_json(data: dict):
-    """One-time copy of every record from a JSON store's already-loaded
-    dict (db.py's _load() shape) into MySQL, preserving every id (user id,
-    footer_link id) so relationships (sessions/stories/image_usage/
-    payments/redemptions -> user_id) stay intact after the switch. Runs
-    inside a single transaction - if anything fails partway through,
-    nothing is left half-migrated.
-
-    Assumes ensure_schema() has already been called (so the target
-    database and empty tables exist) and that the tables are actually
-    empty - this is a first-time import, not a merge."""
-    conn = _connect()
-    try:
-        cur = conn.cursor()
-
-        for u in data.get("users", []):
-            cur.execute(
-                "INSERT INTO users (id, username, password_salt, password_hash, role, status, "
-                "image_credits, created_at) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
-                (u["id"], u["username"], u["password_salt"], u["password_hash"],
-                 u.get("role", "user"), u.get("status", "active"),
-                 u.get("image_credits", DEFAULT_IMAGE_CREDITS), u["created_at"]),
-            )
-
-        # Skip any session whose user_id has no matching user - the JSON
-        # store never enforced referential integrity, so a session can
-        # outlive the account it belonged to (e.g. delete_user() doesn't
-        # touch OTHER rows' user_id references). get_user_by_session_token()
-        # already treats such a session as functionally invalid (its JOIN/
-        # loop finds no matching user and returns None either way), so
-        # dropping it here changes no observable behavior - it only avoids
-        # violating the FK constraint sessions.user_id -> users.id below.
-        valid_user_ids = {u["id"] for u in data.get("users", [])}
-        for s in data.get("sessions", []):
-            if s["user_id"] not in valid_user_ids:
-                continue
-            cur.execute(
-                "INSERT INTO sessions (token, user_id, created_at) VALUES (%s, %s, %s)",
-                (s["token"], s["user_id"], s["created_at"]),
-            )
-
-        for s in data.get("stories", []):
-            cur.execute(
-                "INSERT INTO stories (job_id, user_id, published, view_count, created_at) "
-                "VALUES (%s, %s, %s, %s, %s)",
-                (s["job_id"], s["user_id"], 1 if s.get("published") else 0,
-                 s.get("view_count", 0), s["created_at"]),
-            )
-
-        for iu in data.get("image_usage", []):
-            cur.execute(
-                "INSERT INTO image_usage (user_id, job_id, page_number, prompt, image_url, created_at) "
-                "VALUES (%s, %s, %s, %s, %s, %s)",
-                (iu["user_id"], iu["job_id"], iu.get("page_number"), iu.get("prompt"),
-                 iu.get("image_url"), iu["created_at"]),
-            )
-
-        for p in data.get("processed_payments", []):
-            cur.execute(
-                "INSERT INTO processed_payments (session_id, user_id, credits, amount_usd, created_at) "
-                "VALUES (%s, %s, %s, %s, %s)",
-                (p["session_id"], p["user_id"], p["credits"], p.get("amount_usd"), p["created_at"]),
-            )
-
-        for c in data.get("coupons", []):
-            cur.execute(
-                "INSERT INTO coupons (code, credits, active, created_at) VALUES (%s, %s, %s, %s)",
-                (c["code"], c["credits"], 1 if c.get("active", True) else 0, c["created_at"]),
-            )
-
-        for r in data.get("coupon_redemptions", []):
-            cur.execute(
-                "INSERT INTO coupon_redemptions (code, user_id, credits, redeemed_at) "
-                "VALUES (%s, %s, %s, %s)",
-                (r["code"], r["user_id"], r["credits"], r["redeemed_at"]),
-            )
-
-        for l in data.get("footer_links", []):
-            cur.execute(
-                "INSERT INTO footer_links (id, name, url, new_tab, created_at) "
-                "VALUES (%s, %s, %s, %s, %s)",
-                (l["id"], l["name"], l["url"], 1 if l.get("new_tab") else 0, l["created_at"]),
-            )
-
-        for ch in data.get("characters", []):
-            cur.execute(
-                "INSERT INTO characters (id, owner_user_id, name, type, description, appearance, "
-                "personality, prompt_used, reference_image_path, category, age_group, school, "
-                "status, moderation_note, source_story_job_id, source_page_number, view_count, "
-                "use_count, created_at, updated_at) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
-                (ch["id"], ch["owner_user_id"], ch["name"], ch.get("type", "kid"),
-                 ch.get("description"), ch["appearance"], ch.get("personality"),
-                 ch.get("prompt_used"), ch.get("reference_image_path"), ch.get("category"),
-                 ch.get("age_group"), ch.get("school"), ch.get("status", "draft"),
-                 ch.get("moderation_note"), ch.get("source_story_job_id"),
-                 ch.get("source_page_number"), ch.get("view_count", 0), ch.get("use_count", 0),
-                 ch["created_at"], ch.get("updated_at", ch["created_at"])),
-            )
-
-        for comp in data.get("competitions", []):
-            cur.execute(
-                "INSERT INTO competitions (id, title, description, theme, start_date, end_date, "
-                "status, created_by, created_at, finalized_at) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
-                (comp["id"], comp["title"], comp.get("description"), comp.get("theme"),
-                 comp["start_date"], comp["end_date"], comp.get("status", "active"),
-                 comp.get("created_by"), comp["created_at"], comp.get("finalized_at")),
-            )
-
-        for e in data.get("competition_entries", []):
-            cur.execute(
-                "INSERT INTO competition_entries (id, competition_id, job_id, user_id, entry_type, "
-                "submitted_at, score_creativity, score_originality, score_structure, score_educational, "
-                "score_language, score_total, score_feedback, scored_at, `rank`, is_winner, "
-                "certificate_participation_path, certificate_winner_path, created_at) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
-                (e["id"], e["competition_id"], e["job_id"], e["user_id"], e["entry_type"],
-                 e["submitted_at"], e.get("score_creativity"), e.get("score_originality"),
-                 e.get("score_structure"), e.get("score_educational"), e.get("score_language"),
-                 e.get("score_total"), e.get("score_feedback"), e.get("scored_at"), e.get("rank"),
-                 1 if e.get("is_winner") else 0, e.get("certificate_participation_path"),
-                 e.get("certificate_winner_path"), e["created_at"]),
-            )
-
-        settings = data.get("site_settings") or {}
-        cur.execute(
-            "UPDATE site_settings SET site_name=%s, footer_text=%s, contact_email=%s, "
-            "contact_phone=%s, page_count=%s, signup_credits=%s WHERE id = 1",
-            (settings.get("site_name", "Kertoons"), settings.get("footer_text", ""),
-             settings.get("contact_email", ""), settings.get("contact_phone", ""),
-             settings.get("page_count", 5), settings.get("signup_credits", DEFAULT_IMAGE_CREDITS)),
-        )
-
-        cost = data.get("cost_settings") or {}
-        cur.execute(
-            "UPDATE cost_settings SET cost_per_image=%s, server_fee=%s WHERE id = 1",
-            (cost.get("cost_per_image", 0.0), cost.get("server_fee", 0.0)),
-        )
-
-        # ALTER TABLE is DDL, and MySQL/InnoDB implicitly commits the
-        # current transaction the moment DDL runs - so these two MUST come
-        # last, only once every row insert above has already succeeded.
-        # Running them any earlier would silently commit whatever had been
-        # inserted so far, defeating the "nothing left half-migrated on
-        # failure" guarantee this function promises (conn.rollback() below
-        # can't undo a commit that already happened).
-        if data.get("users"):
-            cur.execute(
-                "ALTER TABLE users AUTO_INCREMENT = %s",
-                (max(u["id"] for u in data["users"]) + 1,),
-            )
-        if data.get("footer_links"):
-            cur.execute(
-                "ALTER TABLE footer_links AUTO_INCREMENT = %s",
-                (max(l["id"] for l in data["footer_links"]) + 1,),
-            )
-        if data.get("characters"):
-            cur.execute(
-                "ALTER TABLE characters AUTO_INCREMENT = %s",
-                (max(ch["id"] for ch in data["characters"]) + 1,),
-            )
-        if data.get("competitions"):
-            cur.execute(
-                "ALTER TABLE competitions AUTO_INCREMENT = %s",
-                (max(comp["id"] for comp in data["competitions"]) + 1,),
-            )
-        if data.get("competition_entries"):
-            cur.execute(
-                "ALTER TABLE competition_entries AUTO_INCREMENT = %s",
-                (max(e["id"] for e in data["competition_entries"]) + 1,),
-            )
-
-        conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.close()

@@ -135,23 +135,18 @@ if not PUBLIC_BASE_URL:
     PUBLIC_BASE_URL = f"http://{HOST}:{PORT}"
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-# Overridable so a throwaway test server (see KERTOONS_DB_PATH/
-# KERTOONS_GENERATED_DIR below) can point at an isolated copy instead of
-# ever writing into the real static/ folder - needed now that the admin
+# Overridable so a throwaway test server (see KERTOONS_GENERATED_DIR below,
+# and KERTOONS_BACKEND_CONFIG_PATH in backend_config.py for pointing a test
+# run at an isolated MySQL database) can point at an isolated copy instead
+# of ever writing into the real static/ folder - needed now that the admin
 # panel can overwrite a static file in place (the banner image upload, see
 # server.py's /api/admin/settings/banner).
 STATIC_DIR = os.environ.get("KERTOONS_STATIC_DIR", os.path.join(BASE_DIR, "static"))
 
-# Both overridable via env var so a throwaway server instance (used to
-# verify a change in a browser/tests) can point at a fully isolated
-# scratch location instead of ever touching real user data or generated
-# stories - see KERTOONS_DB_PATH / KERTOONS_GENERATED_DIR.
+# Overridable via env var so a throwaway server instance (used to verify a
+# change in a browser/tests) can point at a fully isolated scratch location
+# instead of ever touching real generated stories.
 GENERATED_DIR = os.environ.get("KERTOONS_GENERATED_DIR", os.path.join(BASE_DIR, "generated"))
-
-# User accounts / sessions / story ownership - a single JSON file rather than a
-# real database engine (see story_engine/db.py), simple enough at this app's
-# scale (a handful of users, dozens of stories) that a real DB isn't needed.
-DB_PATH = os.environ.get("KERTOONS_DB_PATH", os.path.join(BASE_DIR, "kertoons_data.json"))
 
 # If both are set, an admin account is auto-created (or left alone if it
 # already exists) on every server startup - see db.create_admin_if_missing().

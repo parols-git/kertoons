@@ -1,14 +1,17 @@
 """
-Tracks which storage backend the app is using - the original JSON file
-(story_engine/db.py's default) or a MySQL database (story_engine/
-mysql_store.py) - plus the MySQL connection settings, once configured.
+Stores the MySQL connection settings (host/port/database/user/password),
+editable from the admin panel's Database section. This used to also track
+which of two backends ("json" or "mysql") was active - MySQL is now the
+only backend, so that switch is gone; this file is purely connection
+config now, same "must be readable independent of anything it configures"
+reasoning as before (it can't live inside the database it's describing how
+to reach).
 
-This is intentionally a SEPARATE tiny file from kertoons_data.json: it has
-to be readable before we know which backend even holds the real data, so it
-can never itself live inside the JSON "database" it might be switching away
-from. Same atomic-write-under-lock pattern as db.py's _save(), for the same
-reason (a crash mid-write must never leave a half-written, unparseable
-config file behind).
+Same atomic-write-under-lock pattern as the rest of this app's small
+JSON-file config stores (api_config.py) - a crash mid-write must never
+leave a half-written, unparseable config file behind. This is config, not
+data - see story_engine/db.py's module docstring for why the actual
+application data no longer has a JSON-file option at all.
 """
 import os
 import json
@@ -25,14 +28,6 @@ CONFIG_PATH = os.environ.get(
 )
 
 _DEFAULT = {
-    "backend": "json",
-    # True once migrate_from_json() has ever run successfully - guards
-    # against re-running it (and hitting duplicate-key errors, or silently
-    # re-cloning stale data) if MySQL is switched off and back on again
-    # later. Switching back to "json" never touches this - the JSON file
-    # itself is left alone by every step here, so it's always there to
-    # switch back to.
-    "migrated": False,
     "mysql": {
         "host": "",
         "port": 3306,
@@ -48,10 +43,10 @@ def _load() -> dict:
         return json.loads(json.dumps(_DEFAULT))
     with open(CONFIG_PATH, "r", encoding="utf-8") as f:
         data = json.load(f)
-    # Backfill any keys missing from an older version of this file, same
-    # forward-compatibility convention as db.py's get_site_settings().
+    # Backfill any keys missing from an older version of this file (e.g. one
+    # written before "characters"/"competitions" existed, or from before the
+    # "backend"/"migrated" fields were removed).
     merged = json.loads(json.dumps(_DEFAULT))
-    merged.update({k: v for k, v in data.items() if k != "mysql"})
     merged["mysql"].update(data.get("mysql") or {})
     return merged
 
@@ -67,14 +62,6 @@ def _save(data: dict):
         if os.path.exists(tmp_path):
             os.remove(tmp_path)
         raise
-
-
-def get_backend() -> str:
-    """"json" or "mysql" - which store db.py's public functions should
-    actually read/write. Defaults to "json" so an app that's never touched
-    this feature behaves exactly as it always has."""
-    with _LOCK:
-        return _load()["backend"]
 
 
 def get_mysql_settings() -> dict:
@@ -107,24 +94,3 @@ def set_mysql_settings(host: str, port: int, database: str, user: str, password:
         }
         _save(data)
         return dict(data["mysql"])
-
-
-def set_backend(backend: str):
-    if backend not in ("json", "mysql"):
-        raise ValueError(f"unknown backend {backend!r}")
-    with _LOCK:
-        data = _load()
-        data["backend"] = backend
-        _save(data)
-
-
-def is_migrated() -> bool:
-    with _LOCK:
-        return bool(_load().get("migrated"))
-
-
-def set_migrated():
-    with _LOCK:
-        data = _load()
-        data["migrated"] = True
-        _save(data)

@@ -5,10 +5,11 @@ GEMINI_API_KEY, DEEPAI_API_KEY, and the Stripe keys. Before this existed,
 changing any of these meant SSH-ing into the server and hand-editing .env;
 now they can be viewed (masked) and updated from Admin > API Keys.
 
-Same pattern as backend_config.py: a small, separate local JSON file (never
-inside kertoons_data.json, which may itself be swapped out for MySQL) that
-config.py reads once at import time, with a persisted value here always
-winning over the environment variable of the same name. Because config.py
+Same pattern as backend_config.py: a small, separate local JSON file (kept
+apart from the app's actual data, which lives in MySQL - see
+story_engine/db.py) that config.py reads once at import time, with a
+persisted value here always winning over the environment variable of the
+same name. Because config.py
 only reads this at import, a save here takes effect on the NEXT server
 restart, not instantly - the admin UI says so explicitly rather than
 implying a live reload that doesn't actually happen.

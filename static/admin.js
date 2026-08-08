@@ -216,14 +216,12 @@ async function loadDatabaseStatus() {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "Failed to load database status");
 
-    const usingMysql = data.backend === "mysql";
-    document.getElementById("database-status").innerHTML = usingMysql
-      ? `Currently using <strong>MySQL</strong> (<code>${_adminEscapeHtml(data.mysql.database)}</code> on ${_adminEscapeHtml(data.mysql.host)}).`
-      : `Currently using the local <strong>JSON file</strong>.`;
-    document.getElementById("database-switch-json-wrap").style.display = usingMysql ? "block" : "none";
+    document.getElementById("database-status").innerHTML = data.mysql.host
+      ? `Connected to <strong>MySQL</strong> (<code>${_adminEscapeHtml(data.mysql.database)}</code> on ${_adminEscapeHtml(data.mysql.host)}).`
+      : `MySQL connection not configured yet - fill in the form below.`;
 
     // Prefill the form with whatever's already saved (password stays
-    // masked/blank - see server.py's /api/admin/database/mysql/enable,
+    // masked/blank - see server.py's /api/admin/database/mysql/save,
     // which keeps the existing saved password when this field is left
     // blank on re-submit).
     document.getElementById("database-host").value = data.mysql.host || "";
@@ -263,38 +261,15 @@ document.getElementById("database-test-btn").addEventListener("click", async () 
 
 document.getElementById("database-form").addEventListener("submit", async (e) => {
   e.preventDefault();
-  if (!confirm(
-    "This creates the database/tables on the MySQL server if needed, copies your existing " +
-    "data in (first time only), and switches the app to read/write MySQL from now on. Continue?"
-  )) return;
   try {
-    const res = await fetch("api/admin/database/mysql/enable", {
+    const res = await fetch("api/admin/database/mysql/save", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify(_databaseFormValues()),
     });
     const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "Failed to enable MySQL");
+    if (!res.ok) throw new Error(data.error || "Failed to save database settings");
     document.getElementById("database-password").value = "";
-    const migratedNote = data.migrated
-      ? ` Migrated ${data.migrated.users} users, ${data.migrated.stories} stories, ${data.migrated.coupons} coupons.`
-      : "";
-    _adminShowBanner(`Now using MySQL.${migratedNote}`, "success");
-    loadDatabaseStatus();
-  } catch (e) {
-    alert(e.message);
-  }
-});
-
-document.getElementById("database-switch-json-btn").addEventListener("click", async () => {
-  if (!confirm("Switch back to the local JSON file? MySQL data is left as-is - you can switch back later.")) return;
-  try {
-    const res = await fetch("api/admin/database/switch", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ backend: "json" }),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "Failed to switch backend");
-    _adminShowBanner("Switched back to the JSON file.", "success");
+    _adminShowBanner("Database settings saved - any missing tables were created.", "success");
     loadDatabaseStatus();
   } catch (e) {
     alert(e.message);

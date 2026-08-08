@@ -592,8 +592,6 @@ class Handler(BaseHTTPRequestHandler):
                 if not self._require_admin():
                     return
                 self._send_json({
-                    "backend": backend_config.get_backend(),
-                    "migrated": backend_config.is_migrated(),
                     "mysql": backend_config.get_mysql_settings_public(),
                 })
                 return
@@ -1623,7 +1621,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json({"ok": True, "message": message})
                 return
 
-            if path == "/api/admin/database/mysql/enable":
+            if path == "/api/admin/database/mysql/save":
                 if not self._require_admin():
                     return
                 body = self._read_json_body()
@@ -1661,48 +1659,7 @@ class Handler(BaseHTTPRequestHandler):
                     return
 
                 backend_config.set_mysql_settings(host, port, database, user, password)
-
-                migrated_counts = None
-                if not backend_config.is_migrated():
-                    try:
-                        snapshot = db.export_json_snapshot()
-                        mysql_store.migrate_from_json(snapshot)
-                        backend_config.set_migrated()
-                        migrated_counts = {
-                            "users": len(snapshot.get("users", [])),
-                            "stories": len(snapshot.get("stories", [])),
-                            "coupons": len(snapshot.get("coupons", [])),
-                        }
-                    except Exception as e:
-                        self._send_error_json(f"schema created, but migrating existing data failed: {e}", 500)
-                        return
-
-                backend_config.set_backend("mysql")
-                self._send_json({"ok": True, "backend": "mysql", "migrated": migrated_counts})
-                return
-
-            if path == "/api/admin/database/switch":
-                if not self._require_admin():
-                    return
-                body = self._read_json_body()
-                target = body.get("backend")
-                if target not in ("json", "mysql"):
-                    self._send_error_json('backend must be "json" or "mysql"', 400)
-                    return
-                if target == "mysql":
-                    settings = backend_config.get_mysql_settings()
-                    if not settings.get("host") or not settings.get("database"):
-                        self._send_error_json(
-                            "MySQL hasn't been configured yet - use \"Enable MySQL\" first", 400)
-                        return
-                    ok, message = mysql_store.test_connection(
-                        settings["host"], settings["port"], settings["database"],
-                        settings["user"], settings["password"])
-                    if not ok:
-                        self._send_error_json(f"could not connect to the saved MySQL settings: {message}", 400)
-                        return
-                backend_config.set_backend(target)
-                self._send_json({"ok": True, "backend": target})
+                self._send_json({"ok": True})
                 return
 
             if path == "/api/admin/api-keys/update":
@@ -2081,40 +2038,50 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
-    db.init_db()
-    if backend_config.get_backend() == "mysql":
+    # Every startup step below needs a working MySQL connection - wrapped in
+    # one try/except so a database that's unreachable at boot (unconfigured
+    # fresh install, or MySQL just not up yet at the moment systemd starts
+    # this service) prints one clear diagnosis and lets the process start
+    # and keep listening anyway, rather than crashing with a raw traceback.
+    # Every request that touches the database will keep failing until MySQL
+    # is reachable and this service is restarted (see DEPLOY.md) - nothing
+    # here falls back to anything else.
+    try:
         # Idempotent (every statement is CREATE TABLE IF NOT EXISTS) - safe
-        # to run on every single startup, not just when an admin explicitly
-        # clicks "Enable MySQL". Without this, a deploy that adds a new
-        # table (as this app's own git history already has more than once)
-        # would 500 on first use of that table until someone remembered to
-        # re-click "Enable MySQL" in the admin panel by hand - this closes
-        # that gap for good rather than relying on manual follow-through
-        # after every future schema change.
-        try:
-            mysql_store.ensure_schema(backend_config.get_mysql_settings())
-        except Exception as e:
-            print(f"WARNING: could not sync MySQL schema on startup: {e}")
-    if config.ADMIN_USERNAME and config.ADMIN_PASSWORD:
-        salt, digest = auth.hash_password(config.ADMIN_PASSWORD)
-        result = db.create_admin_if_missing(config.ADMIN_USERNAME, salt, digest)
-        if result == "created":
-            print(f"Admin account '{config.ADMIN_USERNAME}' created.")
-        elif result == "promoted":
-            print(
-                f"Existing account '{config.ADMIN_USERNAME}' promoted to admin "
-                f"(its existing password was kept, NOT ADMIN_PASSWORD)."
-            )
-    if config.SUPERADMIN_USERNAME and config.SUPERADMIN_PASSWORD:
-        salt, digest = auth.hash_password(config.SUPERADMIN_PASSWORD)
-        result = db.create_superadmin_if_missing(config.SUPERADMIN_USERNAME, salt, digest)
-        if result == "created":
-            print(f"Superadmin account '{config.SUPERADMIN_USERNAME}' created.")
-        elif result == "promoted":
-            print(
-                f"Existing account '{config.SUPERADMIN_USERNAME}' promoted to superadmin "
-                f"(its existing password was kept, NOT SUPERADMIN_PASSWORD)."
-            )
+        # to run on every single startup, not something that only needs to
+        # happen once. Without this, a deploy that adds a new table would
+        # 500 on first use of that table until someone remembered to create
+        # it by hand - this closes that gap for every future schema change.
+        db.init_db()
+
+        if config.ADMIN_USERNAME and config.ADMIN_PASSWORD:
+            salt, digest = auth.hash_password(config.ADMIN_PASSWORD)
+            result = db.create_admin_if_missing(config.ADMIN_USERNAME, salt, digest)
+            if result == "created":
+                print(f"Admin account '{config.ADMIN_USERNAME}' created.")
+            elif result == "promoted":
+                print(
+                    f"Existing account '{config.ADMIN_USERNAME}' promoted to admin "
+                    f"(its existing password was kept, NOT ADMIN_PASSWORD)."
+                )
+        if config.SUPERADMIN_USERNAME and config.SUPERADMIN_PASSWORD:
+            salt, digest = auth.hash_password(config.SUPERADMIN_PASSWORD)
+            result = db.create_superadmin_if_missing(config.SUPERADMIN_USERNAME, salt, digest)
+            if result == "created":
+                print(f"Superadmin account '{config.SUPERADMIN_USERNAME}' created.")
+            elif result == "promoted":
+                print(
+                    f"Existing account '{config.SUPERADMIN_USERNAME}' promoted to superadmin "
+                    f"(its existing password was kept, NOT SUPERADMIN_PASSWORD)."
+                )
+    except Exception as e:
+        print(f"WARNING: could not reach MySQL on startup ({e}).")
+        print(
+            "Set the connection details in kertoons_backend.json (or via the admin panel's "
+            "Database section once reachable), then restart this service. Starting anyway - "
+            "every database-backed request will fail until MySQL is reachable."
+        )
+
     server = ThreadingHTTPServer((config.HOST, config.PORT), Handler)
     mode = []
     if config.MOCK_STORY:

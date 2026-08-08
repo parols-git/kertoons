@@ -23,9 +23,10 @@ to anyone except their owner - enforced server-side (`Handler._can_view()` in
 `server.py`), not just hidden in the UI, so there's no way to reach one by
 guessing/sharing its URL.
 
-Accounts and story ownership/publish state live in a single JSON file,
-`kertoons_data.json` (see `story_engine/db.py`) - not a full database engine,
-which isn't needed at this app's scale. Passwords are salted/hashed with
+Accounts, story ownership/publish state, characters, and competitions live in
+MySQL (see `story_engine/mysql_store.py`, re-exported under the stable
+`story_engine.db` name every other module calls). Connection settings are
+configured from Admin > Database. Passwords are salted/hashed with
 stdlib `hashlib.pbkdf2_hmac` (`story_engine/auth.py`); sessions are opaque
 tokens in an `HttpOnly` cookie, stored server-side so they're revocable on
 logout. The ~30 stories generated before accounts existed have no owner record
@@ -642,7 +643,8 @@ kertoons-app/
     pipeline.py               # orchestrates one end-to-end job
     book_export.py            # ZIP / PDF storybook assembly (one PDF per language)
     auth.py                   # password hashing (stdlib pbkdf2_hmac)
-    db.py                     # JSON-file-backed accounts/sessions/story-ownership
+    db.py                     # re-exports mysql_store.py under the stable story_engine.db name
+    mysql_store.py            # the actual data store - accounts/sessions/stories/characters/competitions
   static/
     index.html, gallery.js    # public gallery (home page) - published stories only
     login.html, register.html, auth.js
