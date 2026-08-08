@@ -37,6 +37,7 @@ import threading
 import traceback
 import uuid
 import http.cookies
+from decimal import Decimal
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
@@ -47,6 +48,15 @@ from story_engine import character_studio, competition_engine, openai_client
 from story_engine.pipeline import run_job, regenerate_page_image
 from story_engine.book_export import build_zip, get_pdf, pdf_filename
 from story_engine.image_client import ImageGenerationError
+
+
+def _json_default(value):
+    # mysql.connector returns DECIMAL columns (competition entry scores) as
+    # Decimal, which json.dumps can't serialize on its own.
+    if isinstance(value, Decimal):
+        return float(value)
+    raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
+
 
 JOBS = {}
 JOBS_LOCK = threading.Lock()
@@ -204,7 +214,7 @@ class Handler(BaseHTTPRequestHandler):
 
     # -------------------------------------------------------------- helpers
     def _send_json(self, obj, status=200, extra_headers=None):
-        body = json.dumps(obj, ensure_ascii=False).encode("utf-8")
+        body = json.dumps(obj, ensure_ascii=False, default=_json_default).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
