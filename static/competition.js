@@ -124,10 +124,28 @@ async function submitExistingStory(competitionId) {
       body: JSON.stringify({ competition_id: competitionId, job_id: jobId, entry_type: "existing" }),
     });
     const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "Failed to enter competition");
-    _cShowBanner("Story entered into the competition.", "success");
+    if (!res.ok) {
+      console.error("competitions/enter failed:", res.status, data);
+      throw new Error(data.error || `Failed to enter competition (HTTP ${res.status})`);
+    }
+    if (data.scored === false) {
+      // Entry was recorded, but the AI scoring call itself failed server-side
+      // (see server.py's POST /api/competitions/enter) - still a real entry,
+      // just not yet scored, so this is worth surfacing distinctly rather
+      // than as a plain, unqualified success.
+      console.warn("Entry recorded but scoring failed:", data.score_error);
+      _cShowBanner("Story entered, but scoring is still pending - it will show once retried.", "success");
+    } else {
+      _cShowBanner("Story entered into the competition - see \"Your entry is in\" below.", "success");
+    }
     await refresh(competitionId);
+    // Confirmation card renders into #my-entry-summary, ABOVE this form -
+    // scroll it into view so a successful submission is never mistaken for
+    // nothing having happened, which is exactly what a fixed-position
+    // banner alone risks if the page is already scrolled down to the form.
+    document.getElementById("my-entry-summary").scrollIntoView({ behavior: "smooth", block: "center" });
   } catch (e) {
+    console.error("submitExistingStory error:", e);
     _cShowBanner(e.message, "error");
   } finally {
     btn.disabled = false;
