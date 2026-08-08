@@ -2082,6 +2082,19 @@ class Handler(BaseHTTPRequestHandler):
 
 def main():
     db.init_db()
+    if backend_config.get_backend() == "mysql":
+        # Idempotent (every statement is CREATE TABLE IF NOT EXISTS) - safe
+        # to run on every single startup, not just when an admin explicitly
+        # clicks "Enable MySQL". Without this, a deploy that adds a new
+        # table (as this app's own git history already has more than once)
+        # would 500 on first use of that table until someone remembered to
+        # re-click "Enable MySQL" in the admin panel by hand - this closes
+        # that gap for good rather than relying on manual follow-through
+        # after every future schema change.
+        try:
+            mysql_store.ensure_schema(backend_config.get_mysql_settings())
+        except Exception as e:
+            print(f"WARNING: could not sync MySQL schema on startup: {e}")
     if config.ADMIN_USERNAME and config.ADMIN_PASSWORD:
         salt, digest = auth.hash_password(config.ADMIN_PASSWORD)
         result = db.create_admin_if_missing(config.ADMIN_USERNAME, salt, digest)
