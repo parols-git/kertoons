@@ -50,15 +50,15 @@ async function loadLeaderboard(competitionId) {
     return;
   }
   wrap.innerHTML = `
-    <table class="usage-table">
+    <table class="usage-table leaderboard-table">
       <thead><tr><th>Rank</th><th>Storyteller</th><th>Story</th><th>Score</th></tr></thead>
       <tbody>
         ${board.map((e, i) => `
           <tr>
-            <td>${e.rank ?? (i + 1)}${e.is_winner ? " 🏆" : ""}</td>
-            <td>${_cEscapeHtml(e.username)}</td>
-            <td>${e.story_title ? `<a href="story.html?job_id=${e.job_id}">${_cEscapeHtml(e.story_title)}</a>` : "(still generating)"}</td>
-            <td>${e.score_total !== null && e.score_total !== undefined ? e.score_total + " / 50" : "not scored yet"}</td>
+            <td data-label="Rank">${e.rank ?? (i + 1)}${e.is_winner ? " 🏆" : ""}</td>
+            <td data-label="Storyteller">${_cEscapeHtml(e.username)}</td>
+            <td data-label="Story">${e.story_title ? `<a href="story.html?job_id=${e.job_id}">${_cEscapeHtml(e.story_title)}</a>` : "(still generating)"}</td>
+            <td data-label="Score">${e.score_total !== null && e.score_total !== undefined ? e.score_total + " / 50" : "not scored yet"}</td>
           </tr>`).join("")}
       </tbody>
     </table>`;
