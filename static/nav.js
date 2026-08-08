@@ -121,6 +121,8 @@ async function renderNav() {
     nav.innerHTML = `
       <a href="index.html">Gallery</a>
       <a href="create.html">Create a story</a>
+      <a href="characters.html">🎭 Characters</a>
+      <a href="competitions.html">🏆 Competitions</a>
       <a href="usage.html">🖼️ ${user.image_credits} image credits</a>
       <button type="button" class="btn-outline btn-nav" id="add-credits-btn">${addCreditsLabel}</button>
       ${(user.role === "admin" || user.role === "superadmin") ? `<a href="admin.html">🛠 Admin</a>` : ""}
@@ -161,6 +163,8 @@ async function renderNav() {
   } else {
     nav.innerHTML = `
       <a href="index.html">Gallery</a>
+      <a href="characters.html">🎭 Characters</a>
+      <a href="competitions.html">🏆 Competitions</a>
       <a href="login.html">Log in</a>
       <a href="register.html">Register</a>
     `;

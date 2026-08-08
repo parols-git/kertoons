@@ -19,7 +19,9 @@ from .api_utils import StoryGenerationError, post_with_retry
 from .prompts import (
     build_system_prompt, build_user_prompt, VISION_SYSTEM_PROMPT,
     TRANSLATE_SYSTEM_PROMPT, build_translate_user_prompt,
-    IMAGE_CONSISTENCY_CHECK_PROMPT,
+    IMAGE_CONSISTENCY_CHECK_PROMPT, CHARACTER_CREATION_SYSTEM_PROMPT,
+    build_character_creation_user_prompt, COMPETITION_SCORING_SYSTEM_PROMPT,
+    build_competition_scoring_user_prompt,
 )
 
 OPENAI_CHAT_URL = "https://api.openai.com/v1/chat/completions"
@@ -48,14 +50,16 @@ def _chat(messages, model=None, timeout=60):
 
 # --------------------------------------------------------------------- story
 
-def generate_story(initial_text: str, region: str, page_count: int = None) -> dict:
+def generate_story(initial_text: str, region: str, page_count: int = None,
+                    locked_characters: list = None) -> dict:
     page_count = page_count or config.DEFAULT_PAGE_COUNT
     if config.MOCK_STORY:
-        return _mock_story(initial_text, region, page_count)
+        return _mock_story(initial_text, region, page_count, locked_characters)
 
     messages = [
         {"role": "system", "content": build_system_prompt(page_count)},
-        {"role": "user", "content": build_user_prompt(initial_text, region, page_count)},
+        {"role": "user", "content": build_user_prompt(
+            initial_text, region, page_count, locked_characters=locked_characters)},
     ]
     story = _chat(messages)
     _validate_story_shape(story, page_count)
@@ -73,7 +77,8 @@ def _validate_story_shape(story: dict, page_count: int):
         )
 
 
-def _mock_story(initial_text: str, region: str, page_count: int = None) -> dict:
+def _mock_story(initial_text: str, region: str, page_count: int = None,
+                 locked_characters: list = None) -> dict:
     page_count = page_count or config.DEFAULT_PAGE_COUNT
     region = region or "a cozy village by a hill"
     seed = (initial_text or "a small adventure").strip().rstrip(".")
@@ -202,6 +207,23 @@ def _mock_story(initial_text: str, region: str, page_count: int = None) -> dict:
             ),
             "text": text,
         })
+
+    # Test-mode exercise of the Character Library integration path (see
+    # pipeline.run_job's locked-character handling): a real model would be
+    # TOLD about a locked character via build_locked_characters_clause and
+    # would naturally weave it into the plot - the mock generator can't do
+    # that, so this just appends it as a character and puts it on the final
+    # page, which is enough to exercise generation + reference-based
+    # verification for it end to end without a real OPENAI_API_KEY.
+    if locked_characters:
+        locked = locked_characters[0]
+        characters.append({
+            "name": locked["name"], "type": locked.get("type", "kid"),
+            "appearance": locked["appearance"], "personality": locked.get("personality", ""),
+        })
+        if locked["name"] not in pages[-1]["characters_present"]:
+            pages[-1]["characters_present"].append(locked["name"])
+
     return {
         "title": f"{by_name['Pip']['name']}'s Way Home",
         "region": region,
@@ -210,6 +232,136 @@ def _mock_story(initial_text: str, region: str, page_count: int = None) -> dict:
         "pages": pages,
         "_mock": True,
     }
+
+
+# ----------------------------------------------------- character library
+
+def generate_character(prompt_text: str, char_type: str = "kid") -> dict:
+    """Invents ONE standalone character for the Character Library (see
+    character_studio.create_character_from_prompt) - same _chat()/
+    response_format/mock-fallback pattern as generate_story() above, but a
+    much smaller JSON shape (no pages)."""
+    if config.MOCK_STORY:
+        return _mock_character(prompt_text, char_type)
+
+    messages = [
+        {"role": "system", "content": CHARACTER_CREATION_SYSTEM_PROMPT},
+        {"role": "user", "content": build_character_creation_user_prompt(prompt_text, char_type)},
+    ]
+    character = _chat(messages)
+    _validate_character_shape(character)
+    return character
+
+
+def _validate_character_shape(character: dict):
+    required = ("name", "type", "appearance", "personality", "description")
+    for key in required:
+        if key not in character:
+            raise StoryGenerationError(f"Model response missing required field '{key}'")
+
+
+def _mock_character(prompt_text: str, char_type: str = "kid") -> dict:
+    seed = (prompt_text or "a friendly character").strip().rstrip(".")
+    is_animal = (char_type or "kid").lower() == "animal"
+    if is_animal:
+        return {
+            "name": "Sunny",
+            "type": "animal",
+            "appearance": "golden-yellow fur with a cream-colored belly, short fluffy fur, "
+                          "worn natural, no styling, sun-gold color, round brown eyes with one "
+                          "floppy ear that folds forward, a small blue bandana around the neck, "
+                          "no other accessories",
+            "personality": "cheerful and endlessly curious",
+            "description": f"Inspired by \"{seed}\", Sunny is a warm, golden little companion "
+                            "who is always ready for the next adventure.",
+        }
+    return {
+        "name": "Nova",
+        "type": "kid",
+        "appearance": "warm tan skin, shoulder-length, loosely wavy, worn in a high ponytail, "
+                      "deep chestnut-brown hair, hazel eyes with a small constellation of "
+                      "freckles across the nose, a bright teal jacket and white sneakers, "
+                      "round silver star-shaped earrings, no other accessories",
+        "personality": "imaginative and quietly brave",
+        "description": f"Inspired by \"{seed}\", Nova is a thoughtful young explorer who "
+                        "notices the small wonders everyone else walks past.",
+    }
+
+
+# ------------------------------------------------------ competition scoring
+
+def score_competition_entry(story: dict, competition: dict) -> dict:
+    """Judges one finished, already-illustrated story against a
+    competition's theme - see prompts.COMPETITION_SCORING_SYSTEM_PROMPT for
+    the rubric. Lower temperature than generate_story's default (0.2 vs
+    0.3): consistent, repeatable judging matters more here than creative
+    variance - the same story re-scored should land close to the same
+    total, not swing widely run to run."""
+    if config.MOCK_STORY:
+        return _mock_score(story, competition)
+
+    messages = [
+        {"role": "system", "content": COMPETITION_SCORING_SYSTEM_PROMPT},
+        {"role": "user", "content": build_competition_scoring_user_prompt(story, competition)},
+    ]
+    return _score_with_low_temperature(messages)
+
+
+def _score_with_low_temperature(messages) -> dict:
+    """_chat() always sends temperature=0.3 (shared by every other caller in
+    this file) - scoring wants a lower, steadier 0.2, so this makes its own
+    request rather than adding a temperature param to the shared _chat()
+    helper that every other call site would need to remember to pass
+    correctly."""
+    headers = {
+        "Authorization": f"Bearer {config.OPENAI_API_KEY}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "model": config.OPENAI_MODEL, "messages": messages,
+        "response_format": {"type": "json_object"}, "temperature": 0.2,
+    }
+
+    def parse(resp):
+        return json.loads(resp.json()["choices"][0]["message"]["content"])
+
+    result = post_with_retry(OPENAI_CHAT_URL, headers, payload, 60, parse, service_name="OpenAI")
+    _validate_score_shape(result)
+    return result
+
+
+def _validate_score_shape(result: dict):
+    required = ("creativity", "originality", "story_structure", "educational_value",
+                "language_quality", "total", "feedback")
+    for key in required:
+        if key not in result:
+            raise StoryGenerationError(f"Model response missing required field '{key}'")
+
+
+def _mock_score(story: dict, competition: dict) -> dict:
+    """Deterministic pseudo-score derived from the story's own length/page
+    count (never random) - matches this app's "everything works fully
+    offline, and the same input always produces the same mock output"
+    convention (see _mock_story/_mock_character above)."""
+    pages = story.get("pages", [])
+    word_count = sum(len((p.get("text") or "").split()) for p in pages)
+    # Longer, more developed stories score a bit higher on structure/language
+    # in this mock heuristic - capped well short of a perfect score, since a
+    # mock judge should never look indistinguishable from a real one.
+    base = min(7, 4 + len(pages) // 2)
+    lang = min(8, 4 + word_count // 60)
+    scores = {
+        "creativity": base, "originality": max(3, base - 1),
+        "story_structure": base, "educational_value": min(7, base + 1),
+        "language_quality": lang,
+    }
+    scores["total"] = sum(scores.values())
+    scores["feedback"] = (
+        f"[MOCK SCORE] This {len(pages)}-page story about \"{story.get('title', 'your story')}\" "
+        f"was judged offline (no OPENAI_API_KEY set) using a simple length-based estimate, not a "
+        f"real reading of the story."
+    )
+    return scores
 
 
 # -------------------------------------------------------------- translation
@@ -290,7 +442,8 @@ def describe_character_photo(image_bytes: bytes, mime_type: str = "image/png") -
     return post_with_retry(OPENAI_CHAT_URL, headers, payload, 60, parse, service_name="OpenAI")
 
 
-def verify_scene_image(image_bytes: bytes, character_block: str, mime_type: str = "image/png") -> dict:
+def verify_scene_image(image_bytes: bytes, character_block: str, reference_images: list = None,
+                        mime_type: str = "image/png") -> dict:
     """Asks a vision-capable model whether the generated image actually
     shows each character with their own fixed traits (see
     prompts.IMAGE_CONSISTENCY_CHECK_PROMPT) - the automated half of
@@ -298,6 +451,17 @@ def verify_scene_image(image_bytes: bytes, character_block: str, mime_type: str 
     because a plain text2img call has no reliable way to GUARANTEE the
     prompt's character-fidelity instructions were actually followed, only
     to ask nicely for it. Returns {"consistent": bool, "issues": [str]}.
+
+    `reference_images`: optional list of `(character_name, image_bytes)` -
+    for characters pulled from the Character Library (see
+    character_studio.py), their stored reference image is included alongside
+    the text description, so the model can catch a drift the text alone
+    might miss (e.g. a subtly wrong shade that reads as compliant against
+    a written color name but is visibly off next to the actual reference
+    picture). Reference images are NEVER fed into image generation itself
+    (see image_client.py's CHARACTER CONSISTENCY STRATEGY docstring for why
+    that was tried and reverted) - verification-only, purely additional
+    input to this check.
 
     Best-effort: mock mode returns a trivially-passing result (nothing to
     verify against without a real character_block-following image engine
@@ -309,15 +473,17 @@ def verify_scene_image(image_bytes: bytes, character_block: str, mime_type: str 
         return {"consistent": True, "issues": []}
     try:
         b64 = base64.b64encode(image_bytes).decode("ascii")
+        content = [
+            {"type": "text", "text": f"Fixed character descriptions:\n{character_block}"},
+            {"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{b64}"}},
+        ]
+        for name, ref_bytes in (reference_images or []):
+            ref_b64 = base64.b64encode(ref_bytes).decode("ascii")
+            content.append({"type": "text", "text": f"Reference image for {name}:"})
+            content.append({"type": "image_url", "image_url": {"url": f"data:image/png;base64,{ref_b64}"}})
         messages = [
             {"role": "system", "content": IMAGE_CONSISTENCY_CHECK_PROMPT},
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": f"Fixed character descriptions:\n{character_block}"},
-                    {"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{b64}"}},
-                ],
-            },
+            {"role": "user", "content": content},
         ]
         headers = {
             "Authorization": f"Bearer {config.OPENAI_API_KEY}",

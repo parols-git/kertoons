@@ -77,6 +77,9 @@ MAX_SIGNUP_CREDITS = 500
 _SKELETON = {
     "next_user_id": 1,
     "next_footer_link_id": 1,
+    "next_character_id": 1,
+    "next_competition_id": 1,
+    "next_competition_entry_id": 1,
     "users": [],
     "sessions": [],
     "stories": [],
@@ -85,6 +88,9 @@ _SKELETON = {
     "coupons": [],
     "coupon_redemptions": [],
     "footer_links": [],
+    "characters": [],
+    "competitions": [],
+    "competition_entries": [],
     "site_settings": {
         "site_name": DEFAULT_SITE_NAME,
         "footer_text": DEFAULT_FOOTER_TEXT,
@@ -842,3 +848,471 @@ def set_cost_settings(cost_per_image: float, server_fee: float) -> dict:
         }
         _save(data)
         return dict(data["cost_settings"])
+
+
+# -------------------------------------------------------------- characters
+#
+# A "character" here is a reusable, cross-story identity - name + the same
+# rigid 5-slot "appearance" string prompts.py already requires per-story
+# characters to have (see prompts.build_character_prompt_block), plus a
+# generated reference image. Unlike a story's own characters[] array (which
+# is invented fresh every time and never persisted beyond its own
+# generated/<job_id>/story.json), a row here can be referenced BY ID from a
+# later story (see server.py's POST /api/story character_ids handling and
+# pipeline.py's locked-character overwrite), so its appearance stays byte-
+# for-byte identical across every story that uses it, not just across pages
+# within one story.
+#
+# status is "draft" -> "pending" (student/"user"-role submissions awaiting
+# admin review) or "published" (admin/superadmin submissions publish
+# immediately - see server.py's submit handler) -> "rejected" (admin
+# declined, moderation_note explains why - the character can be edited and
+# resubmitted). Never "unpublished" once published except by an admin
+# rejecting it - see server.py's judgment call on re-review after edits.
+
+def _find_character(data: dict, character_id: int):
+    return next((c for c in data.get("characters", []) if c["id"] == character_id), None)
+
+
+@_dispatch
+def create_character(owner_user_id: int, name: str, type: str, description: str,
+                      appearance: str, personality: str = "", prompt_used: str = None,
+                      category: str = None, age_group: str = None, school: str = None,
+                      source_story_job_id: str = None, source_page_number: int = None) -> dict:
+    with _LOCK:
+        data = _load()
+        now = _now()
+        character = {
+            "id": data["next_character_id"],
+            "owner_user_id": owner_user_id,
+            "name": name,
+            "type": type,
+            "description": description,
+            "appearance": appearance,
+            "personality": personality,
+            "prompt_used": prompt_used,
+            "reference_image_path": None,
+            "category": category,
+            "age_group": age_group,
+            "school": school,
+            "status": "draft",
+            "moderation_note": None,
+            "source_story_job_id": source_story_job_id,
+            "source_page_number": source_page_number,
+            "view_count": 0,
+            "use_count": 0,
+            "created_at": now,
+            "updated_at": now,
+        }
+        data.setdefault("characters", []).append(character)
+        data["next_character_id"] += 1
+        _save(data)
+        return character
+
+
+@_dispatch
+def update_character(character_id: int, name: str = None, description: str = None,
+                      appearance: str = None, personality: str = None, type: str = None,
+                      category: str = None, age_group: str = None, school: str = None) -> dict:
+    """Only the given (non-None) fields are changed. Returns the updated
+    record, or None if no character with that id exists. Whether a
+    previously-published character should revert to "pending" after an edit
+    is a moderation decision made by the caller (see server.py) via a
+    separate set_character_status() call - this function only ever touches
+    the fields it's given, never `status`."""
+    with _LOCK:
+        data = _load()
+        character = _find_character(data, character_id)
+        if not character:
+            return None
+        for field, value in (
+            ("name", name), ("description", description), ("appearance", appearance),
+            ("personality", personality), ("type", type), ("category", category),
+            ("age_group", age_group), ("school", school),
+        ):
+            if value is not None:
+                character[field] = value
+        character["updated_at"] = _now()
+        _save(data)
+        return character
+
+
+@_dispatch
+def set_character_reference_image(character_id: int, path: str, prompt_used: str = None) -> bool:
+    """`prompt_used` is optional since a character can also get its
+    reference image copied from an existing story's debut page (see
+    character_studio.create_character_from_story), which has no fresh
+    "prompt that produced this image" of its own to record here."""
+    with _LOCK:
+        data = _load()
+        character = _find_character(data, character_id)
+        if not character:
+            return False
+        character["reference_image_path"] = path
+        if prompt_used is not None:
+            character["prompt_used"] = prompt_used
+        character["updated_at"] = _now()
+        _save(data)
+        return True
+
+
+@_dispatch
+def get_character(character_id: int) -> dict:
+    with _LOCK:
+        data = _load()
+    return _find_character(data, character_id)
+
+
+@_dispatch
+def delete_character(character_id: int) -> bool:
+    with _LOCK:
+        data = _load()
+        characters = data.get("characters", [])
+        remaining = [c for c in characters if c["id"] != character_id]
+        if len(remaining) == len(characters):
+            return False
+        data["characters"] = remaining
+        _save(data)
+        return True
+
+
+@_dispatch
+def submit_character_for_publication(character_id: int, target_status: str) -> dict:
+    """target_status is "pending" (role="user" submissions - see server.py's
+    _isAdminRole check) or "published" (admin/superadmin submissions publish
+    immediately, no review needed). Clears any previous moderation_note,
+    since this is a fresh submission (e.g. after the owner edited a
+    "rejected" character and is resubmitting it)."""
+    with _LOCK:
+        data = _load()
+        character = _find_character(data, character_id)
+        if not character:
+            return None
+        character["status"] = target_status
+        character["moderation_note"] = None
+        character["updated_at"] = _now()
+        _save(data)
+        return character
+
+
+@_dispatch
+def set_character_status(character_id: int, status: str, moderation_note: str = None) -> dict:
+    """The admin moderation action - status is "published" (approve),
+    "rejected" (reject or request modifications; moderation_note explains
+    what's wrong)."""
+    with _LOCK:
+        data = _load()
+        character = _find_character(data, character_id)
+        if not character:
+            return None
+        character["status"] = status
+        character["moderation_note"] = moderation_note
+        character["updated_at"] = _now()
+        _save(data)
+        return character
+
+
+@_dispatch
+def list_characters_for_user(owner_user_id: int) -> list:
+    with _LOCK:
+        data = _load()
+    return [c for c in data.get("characters", []) if c["owner_user_id"] == owner_user_id]
+
+
+@_dispatch
+def list_pending_characters() -> list:
+    """The admin moderation queue - every character awaiting review,
+    annotated with the submitter's username (or None if since deleted), same
+    convention as list_all_stories()."""
+    with _LOCK:
+        data = _load()
+    users_by_id = {u["id"]: u["username"] for u in data["users"]}
+    result = []
+    for c in data.get("characters", []):
+        if c["status"] != "pending":
+            continue
+        record = dict(c)
+        record["owner_username"] = users_by_id.get(c["owner_user_id"])
+        result.append(record)
+    return result
+
+
+@_dispatch
+def list_published_characters(category: str = None, age_group: str = None,
+                               school: str = None, search: str = None,
+                               sort: str = "recent") -> list:
+    """The public Character Library listing - published characters only,
+    optionally filtered, sorted "recent" (newest first) or "popular"
+    (highest use_count first, ties broken newest-first)."""
+    with _LOCK:
+        data = _load()
+    results = [c for c in data.get("characters", []) if c["status"] == "published"]
+    if category:
+        results = [c for c in results if (c.get("category") or "").lower() == category.lower()]
+    if age_group:
+        results = [c for c in results if (c.get("age_group") or "").lower() == age_group.lower()]
+    if school:
+        results = [c for c in results if (c.get("school") or "").lower() == school.lower()]
+    if search:
+        needle = search.lower()
+        results = [
+            c for c in results
+            if needle in c["name"].lower() or needle in (c.get("description") or "").lower()
+        ]
+    if sort == "popular":
+        results.sort(key=lambda c: (c.get("use_count", 0), c["created_at"]), reverse=True)
+    else:
+        results.sort(key=lambda c: c["created_at"], reverse=True)
+    return results
+
+
+@_dispatch
+def increment_character_use_count(character_id: int) -> int:
+    """Bumped once per story that successfully references this character
+    (see pipeline.py's run_job) - the "popularity" signal for
+    list_published_characters(sort="popular")."""
+    with _LOCK:
+        data = _load()
+        character = _find_character(data, character_id)
+        if not character:
+            return 0
+        character["use_count"] = character.get("use_count", 0) + 1
+        _save(data)
+        return character["use_count"]
+
+
+@_dispatch
+def increment_character_view_count(character_id: int) -> int:
+    with _LOCK:
+        data = _load()
+        character = _find_character(data, character_id)
+        if not character:
+            return 0
+        character["view_count"] = character.get("view_count", 0) + 1
+        _save(data)
+        return character["view_count"]
+
+
+# ------------------------------------------------------------ competitions
+#
+# A competition is an admin-defined monthly (or any date-range) themed
+# challenge; a competition_entry links one story (job_id) to one competition
+# for one user, carrying its AI-assigned scores and, once the competition is
+# closed, its final rank/winner flag and certificate file paths. Closing is
+# an explicit admin action (finalize_competition below), not a background
+# job - this app has no scheduler/cron infrastructure, and re-running it is
+# safe (it always recomputes every entry's rank from scratch rather than
+# relying on a one-time guard, so clicking "Close & Finalize" twice in a row
+# yields the same result both times).
+
+def _find_competition(data: dict, competition_id: int):
+    return next((c for c in data.get("competitions", []) if c["id"] == competition_id), None)
+
+
+def _find_entry(data: dict, entry_id: int):
+    return next((e for e in data.get("competition_entries", []) if e["id"] == entry_id), None)
+
+
+def _find_entry_by_job(data: dict, competition_id: int, job_id: str):
+    return next(
+        (e for e in data.get("competition_entries", [])
+         if e["competition_id"] == competition_id and e["job_id"] == job_id),
+        None,
+    )
+
+
+@_dispatch
+def create_competition(title: str, description: str, theme: str,
+                        start_date: str, end_date: str, created_by: int) -> dict:
+    with _LOCK:
+        data = _load()
+        now = _now()
+        competition = {
+            "id": data["next_competition_id"],
+            "title": title,
+            "description": description,
+            "theme": theme,
+            "start_date": start_date,
+            "end_date": end_date,
+            "status": "active",
+            "created_by": created_by,
+            "created_at": now,
+            "finalized_at": None,
+        }
+        data.setdefault("competitions", []).append(competition)
+        data["next_competition_id"] += 1
+        _save(data)
+        return competition
+
+
+@_dispatch
+def update_competition(competition_id: int, title: str = None, description: str = None,
+                        theme: str = None, start_date: str = None, end_date: str = None) -> dict:
+    with _LOCK:
+        data = _load()
+        competition = _find_competition(data, competition_id)
+        if not competition:
+            return None
+        for field, value in (
+            ("title", title), ("description", description), ("theme", theme),
+            ("start_date", start_date), ("end_date", end_date),
+        ):
+            if value is not None:
+                competition[field] = value
+        _save(data)
+        return competition
+
+
+@_dispatch
+def list_competitions(status: str = None) -> list:
+    with _LOCK:
+        data = _load()
+    competitions = list(data.get("competitions", []))
+    if status:
+        competitions = [c for c in competitions if c["status"] == status]
+    competitions.sort(key=lambda c: c["created_at"], reverse=True)
+    return competitions
+
+
+@_dispatch
+def get_competition(competition_id: int) -> dict:
+    with _LOCK:
+        data = _load()
+    return _find_competition(data, competition_id)
+
+
+@_dispatch
+def create_or_update_entry(competition_id: int, job_id: str, user_id: int, entry_type: str) -> dict:
+    """Upsert on (competition_id, job_id) - entering the same story into the
+    same competition twice (e.g. a double-click, or re-submitting after
+    editing the story) updates the existing entry rather than creating a
+    duplicate. Scores are cleared back to unset on every (re-)submission -
+    see server.py's POST /api/competitions/enter, which always re-scores
+    immediately after this call, so a stale score is never left visible."""
+    with _LOCK:
+        data = _load()
+        entry = _find_entry_by_job(data, competition_id, job_id)
+        if entry:
+            entry["entry_type"] = entry_type
+            entry["submitted_at"] = _now()
+            for key in ("score_creativity", "score_originality", "score_structure",
+                        "score_educational", "score_language", "score_total",
+                        "score_feedback", "scored_at", "rank", "is_winner"):
+                entry[key] = False if key == "is_winner" else None
+            _save(data)
+            return entry
+        entry = {
+            "id": data["next_competition_entry_id"],
+            "competition_id": competition_id,
+            "job_id": job_id,
+            "user_id": user_id,
+            "entry_type": entry_type,
+            "submitted_at": _now(),
+            "score_creativity": None, "score_originality": None, "score_structure": None,
+            "score_educational": None, "score_language": None, "score_total": None,
+            "score_feedback": None, "scored_at": None,
+            "rank": None, "is_winner": False,
+            "certificate_participation_path": None, "certificate_winner_path": None,
+            "created_at": _now(),
+        }
+        data.setdefault("competition_entries", []).append(entry)
+        data["next_competition_entry_id"] += 1
+        _save(data)
+        return entry
+
+
+@_dispatch
+def set_entry_scores(entry_id: int, scores: dict, feedback: str) -> dict:
+    with _LOCK:
+        data = _load()
+        entry = _find_entry(data, entry_id)
+        if not entry:
+            return None
+        entry["score_creativity"] = scores.get("creativity")
+        entry["score_originality"] = scores.get("originality")
+        entry["score_structure"] = scores.get("story_structure")
+        entry["score_educational"] = scores.get("educational_value")
+        entry["score_language"] = scores.get("language_quality")
+        entry["score_total"] = scores.get("total")
+        entry["score_feedback"] = feedback
+        entry["scored_at"] = _now()
+        _save(data)
+        return entry
+
+
+@_dispatch
+def list_entries_for_competition(competition_id: int) -> list:
+    """Every entry for one competition, annotated with the entrant's
+    username (or None if since deleted) and the story's title (or None if
+    the story is somehow missing) - same annotate-for-the-UI convention as
+    list_all_stories()/list_pending_characters(). Caller (server.py) fills in
+    the title since it lives in the story's own generated/<job_id>/story.json
+    on disk, not in this JSON store."""
+    with _LOCK:
+        data = _load()
+    users_by_id = {u["id"]: u["username"] for u in data["users"]}
+    entries = [dict(e) for e in data.get("competition_entries", []) if e["competition_id"] == competition_id]
+    for e in entries:
+        e["username"] = users_by_id.get(e["user_id"])
+    return entries
+
+
+@_dispatch
+def get_entry(competition_id: int, job_id: str) -> dict:
+    with _LOCK:
+        data = _load()
+    return _find_entry_by_job(data, competition_id, job_id)
+
+
+@_dispatch
+def get_entry_by_id(entry_id: int) -> dict:
+    with _LOCK:
+        data = _load()
+    return _find_entry(data, entry_id)
+
+
+@_dispatch
+def list_entries_for_user(user_id: int) -> list:
+    with _LOCK:
+        data = _load()
+    return [e for e in data.get("competition_entries", []) if e["user_id"] == user_id]
+
+
+@_dispatch
+def finalize_competition(competition_id: int, ranked_entries: list) -> bool:
+    """`ranked_entries` is a list of `(entry_id, rank, is_winner)` tuples,
+    already computed by story_engine.competition_engine.finalize() (score
+    sort + tie-break) - this function just persists that result and flips
+    the competition to "closed". Always rewrites every entry's rank/is_winner
+    from the given list rather than incrementally patching, so calling this
+    twice in a row (e.g. an admin double-clicking "Close & Finalize")
+    produces the identical result both times."""
+    with _LOCK:
+        data = _load()
+        competition = _find_competition(data, competition_id)
+        if not competition:
+            return False
+        by_id = {e["id"]: e for e in data.get("competition_entries", [])}
+        for entry_id, rank, is_winner in ranked_entries:
+            entry = by_id.get(entry_id)
+            if entry:
+                entry["rank"] = rank
+                entry["is_winner"] = bool(is_winner)
+        competition["status"] = "closed"
+        competition["finalized_at"] = _now()
+        _save(data)
+        return True
+
+
+@_dispatch
+def set_entry_certificates(entry_id: int, participation_path: str, winner_path: str = None) -> bool:
+    with _LOCK:
+        data = _load()
+        entry = _find_entry(data, entry_id)
+        if not entry:
+            return False
+        entry["certificate_participation_path"] = participation_path
+        if winner_path is not None:
+            entry["certificate_winner_path"] = winner_path
+        _save(data)
+        return True

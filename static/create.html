@@ -43,6 +43,12 @@
       <input type="file" id="character_photo" accept="image/*">
       <p class="hint">Never used to identify anyone - only turned into a generic, kid-safe cartoon-style description.</p>
 
+      <label for="character-picker-search">Optional: feature characters from the Character Library</label>
+      <input type="text" id="character-picker-search" placeholder="Search characters by name..." autocomplete="off">
+      <div id="character-picker-results" class="character-picker-results"></div>
+      <div id="character-picker-selected" class="character-picker-selected"></div>
+      <p class="hint">Their name, appearance, and personality are locked in exactly as published - the story is written and illustrated around them.</p>
+
       <button type="submit" class="btn-primary" id="submit-btn">Create my Kertoons story ✨</button>
       <p class="hint credit-warning" id="credit-warning" style="display:none;">
         You're out of image credits. Click "➕ Add credits" up next to your balance above to keep creating stories.

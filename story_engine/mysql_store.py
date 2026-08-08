@@ -210,6 +210,80 @@ _SCHEMA_STATEMENTS = [
         cost_per_image DECIMAL(10,4) NOT NULL DEFAULT 0,
         server_fee DECIMAL(10,4) NOT NULL DEFAULT 0
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci""",
+
+    # No FK on owner_user_id - same orphan-on-delete convention as stories
+    # above (a published character should survive its creator's account
+    # being deleted, same as a published story does).
+    """CREATE TABLE IF NOT EXISTS characters (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        owner_user_id INT NOT NULL,
+        name VARCHAR(190) NOT NULL,
+        type VARCHAR(20) NOT NULL DEFAULT 'kid',
+        description TEXT,
+        appearance TEXT NOT NULL,
+        personality TEXT,
+        prompt_used TEXT,
+        reference_image_path VARCHAR(512),
+        category VARCHAR(100),
+        age_group VARCHAR(50),
+        school VARCHAR(190),
+        status VARCHAR(20) NOT NULL DEFAULT 'draft',
+        moderation_note TEXT,
+        source_story_job_id VARCHAR(64),
+        source_page_number INT,
+        view_count INT NOT NULL DEFAULT 0,
+        use_count INT NOT NULL DEFAULT 0,
+        created_at VARCHAR(64) NOT NULL,
+        updated_at VARCHAR(64) NOT NULL,
+        INDEX idx_characters_owner (owner_user_id),
+        INDEX idx_characters_status (status),
+        INDEX idx_characters_category (category),
+        INDEX idx_characters_age_group (age_group),
+        INDEX idx_characters_school (school)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci""",
+
+    """CREATE TABLE IF NOT EXISTS competitions (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        title VARCHAR(255) NOT NULL,
+        description TEXT,
+        theme VARCHAR(255),
+        start_date VARCHAR(32) NOT NULL,
+        end_date VARCHAR(32) NOT NULL,
+        status VARCHAR(20) NOT NULL DEFAULT 'active',
+        created_by INT,
+        created_at VARCHAR(64) NOT NULL,
+        finalized_at VARCHAR(64),
+        INDEX idx_competitions_status (status)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci""",
+
+    # No FK on job_id (a story is a JSON file on disk, not a DB-joinable
+    # row - same "deliberately no FK across that boundary" convention as
+    # image_usage.job_id above) or on user_id (same orphan-on-delete
+    # convention as every other user_id column in this schema).
+    """CREATE TABLE IF NOT EXISTS competition_entries (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        competition_id INT NOT NULL,
+        job_id VARCHAR(64) NOT NULL,
+        user_id INT NOT NULL,
+        entry_type VARCHAR(20) NOT NULL,
+        submitted_at VARCHAR(64) NOT NULL,
+        score_creativity DECIMAL(5,2),
+        score_originality DECIMAL(5,2),
+        score_structure DECIMAL(5,2),
+        score_educational DECIMAL(5,2),
+        score_language DECIMAL(5,2),
+        score_total DECIMAL(6,2),
+        score_feedback TEXT,
+        scored_at VARCHAR(64),
+        `rank` INT,
+        is_winner TINYINT(1) NOT NULL DEFAULT 0,
+        certificate_participation_path VARCHAR(512),
+        certificate_winner_path VARCHAR(512),
+        created_at VARCHAR(64) NOT NULL,
+        UNIQUE KEY uniq_competition_job (competition_id, job_id),
+        INDEX idx_entries_competition (competition_id),
+        INDEX idx_entries_user (user_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci""",
 ]
 
 
@@ -870,6 +944,453 @@ def set_cost_settings(cost_per_image: float, server_fee: float) -> dict:
         conn.close()
 
 
+# -------------------------------------------------------------- characters
+
+def create_character(owner_user_id: int, name: str, type: str, description: str,
+                      appearance: str, personality: str = "", prompt_used: str = None,
+                      category: str = None, age_group: str = None, school: str = None,
+                      source_story_job_id: str = None, source_page_number: int = None) -> dict:
+    conn = _connect()
+    try:
+        cur = conn.cursor()
+        now = _now()
+        cur.execute(
+            "INSERT INTO characters (owner_user_id, name, type, description, appearance, "
+            "personality, prompt_used, category, age_group, school, status, "
+            "source_story_job_id, source_page_number, created_at, updated_at) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'draft', %s, %s, %s, %s)",
+            (owner_user_id, name, type, description, appearance, personality, prompt_used,
+             category, age_group, school, source_story_job_id, source_page_number, now, now),
+        )
+        character_id = cur.lastrowid
+        conn.commit()
+        return {
+            "id": character_id, "owner_user_id": owner_user_id, "name": name, "type": type,
+            "description": description, "appearance": appearance, "personality": personality,
+            "prompt_used": prompt_used, "reference_image_path": None, "category": category,
+            "age_group": age_group, "school": school, "status": "draft", "moderation_note": None,
+            "source_story_job_id": source_story_job_id, "source_page_number": source_page_number,
+            "view_count": 0, "use_count": 0, "created_at": now, "updated_at": now,
+        }
+    finally:
+        conn.close()
+
+
+def update_character(character_id: int, name: str = None, description: str = None,
+                      appearance: str = None, personality: str = None, type: str = None,
+                      category: str = None, age_group: str = None, school: str = None) -> dict:
+    conn = _connect()
+    try:
+        cur = conn.cursor(dictionary=True)
+        fields, values = [], []
+        for column, value in (
+            ("name", name), ("description", description), ("appearance", appearance),
+            ("personality", personality), ("type", type), ("category", category),
+            ("age_group", age_group), ("school", school),
+        ):
+            if value is not None:
+                fields.append(f"{column} = %s")
+                values.append(value)
+        if not fields:
+            cur.execute("SELECT * FROM characters WHERE id = %s", (character_id,))
+            return cur.fetchone()
+        fields.append("updated_at = %s")
+        values.append(_now())
+        values.append(character_id)
+        cur.execute(f"UPDATE characters SET {', '.join(fields)} WHERE id = %s", values)
+        conn.commit()
+        cur.execute("SELECT * FROM characters WHERE id = %s", (character_id,))
+        return cur.fetchone()
+    finally:
+        conn.close()
+
+
+def set_character_reference_image(character_id: int, path: str, prompt_used: str = None) -> bool:
+    conn = _connect()
+    try:
+        cur = conn.cursor()
+        if prompt_used is not None:
+            cur.execute(
+                "UPDATE characters SET reference_image_path = %s, prompt_used = %s, "
+                "updated_at = %s WHERE id = %s",
+                (path, prompt_used, _now(), character_id),
+            )
+        else:
+            cur.execute(
+                "UPDATE characters SET reference_image_path = %s, updated_at = %s WHERE id = %s",
+                (path, _now(), character_id),
+            )
+        conn.commit()
+        return cur.rowcount > 0
+    finally:
+        conn.close()
+
+
+def get_character(character_id: int) -> dict:
+    conn = _connect()
+    try:
+        cur = conn.cursor(dictionary=True)
+        cur.execute("SELECT * FROM characters WHERE id = %s", (character_id,))
+        return cur.fetchone()
+    finally:
+        conn.close()
+
+
+def delete_character(character_id: int) -> bool:
+    conn = _connect()
+    try:
+        cur = conn.cursor()
+        cur.execute("DELETE FROM characters WHERE id = %s", (character_id,))
+        conn.commit()
+        return cur.rowcount > 0
+    finally:
+        conn.close()
+
+
+def submit_character_for_publication(character_id: int, target_status: str) -> dict:
+    conn = _connect()
+    try:
+        cur = conn.cursor(dictionary=True)
+        cur.execute(
+            "UPDATE characters SET status = %s, moderation_note = NULL, updated_at = %s WHERE id = %s",
+            (target_status, _now(), character_id),
+        )
+        conn.commit()
+        cur.execute("SELECT * FROM characters WHERE id = %s", (character_id,))
+        return cur.fetchone()
+    finally:
+        conn.close()
+
+
+def set_character_status(character_id: int, status: str, moderation_note: str = None) -> dict:
+    conn = _connect()
+    try:
+        cur = conn.cursor(dictionary=True)
+        cur.execute(
+            "UPDATE characters SET status = %s, moderation_note = %s, updated_at = %s WHERE id = %s",
+            (status, moderation_note, _now(), character_id),
+        )
+        conn.commit()
+        cur.execute("SELECT * FROM characters WHERE id = %s", (character_id,))
+        return cur.fetchone()
+    finally:
+        conn.close()
+
+
+def list_characters_for_user(owner_user_id: int) -> list:
+    conn = _connect()
+    try:
+        cur = conn.cursor(dictionary=True)
+        cur.execute(
+            "SELECT * FROM characters WHERE owner_user_id = %s ORDER BY created_at DESC",
+            (owner_user_id,),
+        )
+        return cur.fetchall()
+    finally:
+        conn.close()
+
+
+def list_pending_characters() -> list:
+    conn = _connect()
+    try:
+        cur = conn.cursor(dictionary=True)
+        cur.execute(
+            "SELECT c.*, u.username AS owner_username FROM characters c "
+            "LEFT JOIN users u ON u.id = c.owner_user_id WHERE c.status = 'pending' "
+            "ORDER BY c.created_at ASC"
+        )
+        return cur.fetchall()
+    finally:
+        conn.close()
+
+
+def list_published_characters(category: str = None, age_group: str = None,
+                               school: str = None, search: str = None,
+                               sort: str = "recent") -> list:
+    conn = _connect()
+    try:
+        cur = conn.cursor(dictionary=True)
+        clauses = ["status = 'published'"]
+        params = []
+        if category:
+            clauses.append("category = %s")
+            params.append(category)
+        if age_group:
+            clauses.append("age_group = %s")
+            params.append(age_group)
+        if school:
+            clauses.append("school = %s")
+            params.append(school)
+        if search:
+            clauses.append("(name LIKE %s OR description LIKE %s)")
+            needle = f"%{search}%"
+            params.extend([needle, needle])
+        order = "use_count DESC, created_at DESC" if sort == "popular" else "created_at DESC"
+        cur.execute(
+            f"SELECT * FROM characters WHERE {' AND '.join(clauses)} ORDER BY {order}",
+            params,
+        )
+        return cur.fetchall()
+    finally:
+        conn.close()
+
+
+def increment_character_use_count(character_id: int) -> int:
+    conn = _connect()
+    try:
+        cur = conn.cursor()
+        cur.execute("UPDATE characters SET use_count = use_count + 1 WHERE id = %s", (character_id,))
+        if cur.rowcount == 0:
+            conn.commit()
+            return 0
+        conn.commit()
+        cur.execute("SELECT use_count FROM characters WHERE id = %s", (character_id,))
+        return cur.fetchone()[0]
+    finally:
+        conn.close()
+
+
+def increment_character_view_count(character_id: int) -> int:
+    conn = _connect()
+    try:
+        cur = conn.cursor()
+        cur.execute("UPDATE characters SET view_count = view_count + 1 WHERE id = %s", (character_id,))
+        if cur.rowcount == 0:
+            conn.commit()
+            return 0
+        conn.commit()
+        cur.execute("SELECT view_count FROM characters WHERE id = %s", (character_id,))
+        return cur.fetchone()[0]
+    finally:
+        conn.close()
+
+
+# ------------------------------------------------------------ competitions
+
+def create_competition(title: str, description: str, theme: str,
+                        start_date: str, end_date: str, created_by: int) -> dict:
+    conn = _connect()
+    try:
+        cur = conn.cursor()
+        now = _now()
+        cur.execute(
+            "INSERT INTO competitions (title, description, theme, start_date, end_date, "
+            "status, created_by, created_at) VALUES (%s, %s, %s, %s, %s, 'active', %s, %s)",
+            (title, description, theme, start_date, end_date, created_by, now),
+        )
+        competition_id = cur.lastrowid
+        conn.commit()
+        return {
+            "id": competition_id, "title": title, "description": description, "theme": theme,
+            "start_date": start_date, "end_date": end_date, "status": "active",
+            "created_by": created_by, "created_at": now, "finalized_at": None,
+        }
+    finally:
+        conn.close()
+
+
+def update_competition(competition_id: int, title: str = None, description: str = None,
+                        theme: str = None, start_date: str = None, end_date: str = None) -> dict:
+    conn = _connect()
+    try:
+        cur = conn.cursor(dictionary=True)
+        fields, values = [], []
+        for column, value in (
+            ("title", title), ("description", description), ("theme", theme),
+            ("start_date", start_date), ("end_date", end_date),
+        ):
+            if value is not None:
+                fields.append(f"{column} = %s")
+                values.append(value)
+        if fields:
+            values.append(competition_id)
+            cur.execute(f"UPDATE competitions SET {', '.join(fields)} WHERE id = %s", values)
+            conn.commit()
+        cur.execute("SELECT * FROM competitions WHERE id = %s", (competition_id,))
+        return cur.fetchone()
+    finally:
+        conn.close()
+
+
+def list_competitions(status: str = None) -> list:
+    conn = _connect()
+    try:
+        cur = conn.cursor(dictionary=True)
+        if status:
+            cur.execute("SELECT * FROM competitions WHERE status = %s ORDER BY created_at DESC", (status,))
+        else:
+            cur.execute("SELECT * FROM competitions ORDER BY created_at DESC")
+        return cur.fetchall()
+    finally:
+        conn.close()
+
+
+def get_competition(competition_id: int) -> dict:
+    conn = _connect()
+    try:
+        cur = conn.cursor(dictionary=True)
+        cur.execute("SELECT * FROM competitions WHERE id = %s", (competition_id,))
+        return cur.fetchone()
+    finally:
+        conn.close()
+
+
+def create_or_update_entry(competition_id: int, job_id: str, user_id: int, entry_type: str) -> dict:
+    conn = _connect()
+    try:
+        cur = conn.cursor(dictionary=True)
+        cur.execute(
+            "SELECT * FROM competition_entries WHERE competition_id = %s AND job_id = %s",
+            (competition_id, job_id),
+        )
+        existing = cur.fetchone()
+        now = _now()
+        if existing:
+            cur.execute(
+                "UPDATE competition_entries SET entry_type = %s, submitted_at = %s, "
+                "score_creativity = NULL, score_originality = NULL, score_structure = NULL, "
+                "score_educational = NULL, score_language = NULL, score_total = NULL, "
+                "score_feedback = NULL, scored_at = NULL, `rank` = NULL, is_winner = 0 "
+                "WHERE id = %s",
+                (entry_type, now, existing["id"]),
+            )
+            conn.commit()
+            cur.execute("SELECT * FROM competition_entries WHERE id = %s", (existing["id"],))
+            return cur.fetchone()
+        cur.execute(
+            "INSERT INTO competition_entries (competition_id, job_id, user_id, entry_type, "
+            "submitted_at, is_winner, created_at) VALUES (%s, %s, %s, %s, %s, 0, %s)",
+            (competition_id, job_id, user_id, entry_type, now, now),
+        )
+        entry_id = cur.lastrowid
+        conn.commit()
+        cur.execute("SELECT * FROM competition_entries WHERE id = %s", (entry_id,))
+        return cur.fetchone()
+    finally:
+        conn.close()
+
+
+def set_entry_scores(entry_id: int, scores: dict, feedback: str) -> dict:
+    conn = _connect()
+    try:
+        cur = conn.cursor(dictionary=True)
+        cur.execute(
+            "UPDATE competition_entries SET score_creativity = %s, score_originality = %s, "
+            "score_structure = %s, score_educational = %s, score_language = %s, "
+            "score_total = %s, score_feedback = %s, scored_at = %s WHERE id = %s",
+            (scores.get("creativity"), scores.get("originality"), scores.get("story_structure"),
+             scores.get("educational_value"), scores.get("language_quality"), scores.get("total"),
+             feedback, _now(), entry_id),
+        )
+        conn.commit()
+        cur.execute("SELECT * FROM competition_entries WHERE id = %s", (entry_id,))
+        return cur.fetchone()
+    finally:
+        conn.close()
+
+
+def list_entries_for_competition(competition_id: int) -> list:
+    conn = _connect()
+    try:
+        cur = conn.cursor(dictionary=True)
+        cur.execute(
+            "SELECT e.*, u.username FROM competition_entries e "
+            "LEFT JOIN users u ON u.id = e.user_id WHERE e.competition_id = %s",
+            (competition_id,),
+        )
+        rows = cur.fetchall()
+        for r in rows:
+            r["is_winner"] = bool(r["is_winner"])
+        return rows
+    finally:
+        conn.close()
+
+
+def get_entry(competition_id: int, job_id: str) -> dict:
+    conn = _connect()
+    try:
+        cur = conn.cursor(dictionary=True)
+        cur.execute(
+            "SELECT * FROM competition_entries WHERE competition_id = %s AND job_id = %s",
+            (competition_id, job_id),
+        )
+        row = cur.fetchone()
+        if row:
+            row["is_winner"] = bool(row["is_winner"])
+        return row
+    finally:
+        conn.close()
+
+
+def get_entry_by_id(entry_id: int) -> dict:
+    conn = _connect()
+    try:
+        cur = conn.cursor(dictionary=True)
+        cur.execute("SELECT * FROM competition_entries WHERE id = %s", (entry_id,))
+        row = cur.fetchone()
+        if row:
+            row["is_winner"] = bool(row["is_winner"])
+        return row
+    finally:
+        conn.close()
+
+
+def list_entries_for_user(user_id: int) -> list:
+    conn = _connect()
+    try:
+        cur = conn.cursor(dictionary=True)
+        cur.execute("SELECT * FROM competition_entries WHERE user_id = %s", (user_id,))
+        rows = cur.fetchall()
+        for r in rows:
+            r["is_winner"] = bool(r["is_winner"])
+        return rows
+    finally:
+        conn.close()
+
+
+def finalize_competition(competition_id: int, ranked_entries: list) -> bool:
+    conn = _connect()
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT id FROM competitions WHERE id = %s", (competition_id,))
+        if not cur.fetchone():
+            return False
+        for entry_id, rank, is_winner in ranked_entries:
+            cur.execute(
+                "UPDATE competition_entries SET `rank` = %s, is_winner = %s WHERE id = %s",
+                (rank, 1 if is_winner else 0, entry_id),
+            )
+        cur.execute(
+            "UPDATE competitions SET status = 'closed', finalized_at = %s WHERE id = %s",
+            (_now(), competition_id),
+        )
+        conn.commit()
+        return True
+    finally:
+        conn.close()
+
+
+def set_entry_certificates(entry_id: int, participation_path: str, winner_path: str = None) -> bool:
+    conn = _connect()
+    try:
+        cur = conn.cursor()
+        if winner_path is not None:
+            cur.execute(
+                "UPDATE competition_entries SET certificate_participation_path = %s, "
+                "certificate_winner_path = %s WHERE id = %s",
+                (participation_path, winner_path, entry_id),
+            )
+        else:
+            cur.execute(
+                "UPDATE competition_entries SET certificate_participation_path = %s WHERE id = %s",
+                (participation_path, entry_id),
+            )
+        conn.commit()
+        return cur.rowcount > 0
+    finally:
+        conn.close()
+
+
 # --------------------------------------------------------------- migration
 
 def migrate_from_json(data: dict):
@@ -956,6 +1477,46 @@ def migrate_from_json(data: dict):
                 (l["id"], l["name"], l["url"], 1 if l.get("new_tab") else 0, l["created_at"]),
             )
 
+        for ch in data.get("characters", []):
+            cur.execute(
+                "INSERT INTO characters (id, owner_user_id, name, type, description, appearance, "
+                "personality, prompt_used, reference_image_path, category, age_group, school, "
+                "status, moderation_note, source_story_job_id, source_page_number, view_count, "
+                "use_count, created_at, updated_at) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                (ch["id"], ch["owner_user_id"], ch["name"], ch.get("type", "kid"),
+                 ch.get("description"), ch["appearance"], ch.get("personality"),
+                 ch.get("prompt_used"), ch.get("reference_image_path"), ch.get("category"),
+                 ch.get("age_group"), ch.get("school"), ch.get("status", "draft"),
+                 ch.get("moderation_note"), ch.get("source_story_job_id"),
+                 ch.get("source_page_number"), ch.get("view_count", 0), ch.get("use_count", 0),
+                 ch["created_at"], ch.get("updated_at", ch["created_at"])),
+            )
+
+        for comp in data.get("competitions", []):
+            cur.execute(
+                "INSERT INTO competitions (id, title, description, theme, start_date, end_date, "
+                "status, created_by, created_at, finalized_at) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                (comp["id"], comp["title"], comp.get("description"), comp.get("theme"),
+                 comp["start_date"], comp["end_date"], comp.get("status", "active"),
+                 comp.get("created_by"), comp["created_at"], comp.get("finalized_at")),
+            )
+
+        for e in data.get("competition_entries", []):
+            cur.execute(
+                "INSERT INTO competition_entries (id, competition_id, job_id, user_id, entry_type, "
+                "submitted_at, score_creativity, score_originality, score_structure, score_educational, "
+                "score_language, score_total, score_feedback, scored_at, `rank`, is_winner, "
+                "certificate_participation_path, certificate_winner_path, created_at) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                (e["id"], e["competition_id"], e["job_id"], e["user_id"], e["entry_type"],
+                 e["submitted_at"], e.get("score_creativity"), e.get("score_originality"),
+                 e.get("score_structure"), e.get("score_educational"), e.get("score_language"),
+                 e.get("score_total"), e.get("score_feedback"), e.get("scored_at"), e.get("rank"),
+                 1 if e.get("is_winner") else 0, e.get("certificate_participation_path"),
+                 e.get("certificate_winner_path"), e["created_at"]),
+            )
+
         settings = data.get("site_settings") or {}
         cur.execute(
             "UPDATE site_settings SET site_name=%s, footer_text=%s, contact_email=%s, "
@@ -987,6 +1548,21 @@ def migrate_from_json(data: dict):
             cur.execute(
                 "ALTER TABLE footer_links AUTO_INCREMENT = %s",
                 (max(l["id"] for l in data["footer_links"]) + 1,),
+            )
+        if data.get("characters"):
+            cur.execute(
+                "ALTER TABLE characters AUTO_INCREMENT = %s",
+                (max(ch["id"] for ch in data["characters"]) + 1,),
+            )
+        if data.get("competitions"):
+            cur.execute(
+                "ALTER TABLE competitions AUTO_INCREMENT = %s",
+                (max(comp["id"] for comp in data["competitions"]) + 1,),
+            )
+        if data.get("competition_entries"):
+            cur.execute(
+                "ALTER TABLE competition_entries AUTO_INCREMENT = %s",
+                (max(e["id"] for e in data["competition_entries"]) + 1,),
             )
 
         conn.commit()

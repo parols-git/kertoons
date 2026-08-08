@@ -43,6 +43,7 @@ from urllib.parse import urlparse, parse_qs
 from PIL import Image, ImageDraw, ImageFont
 
 from story_engine import config, db, auth, payments, share_page, backend_config, mysql_store, api_config
+from story_engine import character_studio, competition_engine, openai_client
 from story_engine.pipeline import run_job, regenerate_page_image
 from story_engine.book_export import build_zip, get_pdf, pdf_filename
 from story_engine.image_client import ImageGenerationError
@@ -85,6 +86,11 @@ MAX_BANNER_UPLOAD_BYTES = 8 * 1024 * 1024
 # header wordmark never needs to be this big, just there to stop a
 # pathological payload.
 MAX_LOGO_UPLOAD_BYTES = 4 * 1024 * 1024
+# A character idea is meant to be a short prompt ("a brave young fox who
+# loves stargazing"), not an essay - generous enough for a real idea, tight
+# enough to stop a pathological payload being sent to the character-creation
+# LLM call.
+MAX_CHARACTER_PROMPT_LEN = 500
 
 
 def new_job_id():
@@ -336,6 +342,22 @@ class Handler(BaseHTTPRequestHandler):
         user = self._current_user()
         return bool(user and user["id"] == owner_id)
 
+    def _can_view_character(self, character: dict) -> bool:
+        """Same shape as _can_view() for stories: a published character is
+        visible to everyone; a draft/pending/rejected one is only visible to
+        its owner or an admin (moderators need to see what they're
+        reviewing, and an owner needs to see their own rejected character
+        plus the moderation_note explaining why, so they can fix and
+        resubmit it)."""
+        if not character:
+            return False
+        if character["status"] == "published":
+            return True
+        user = self._current_user()
+        if not user:
+            return False
+        return user["id"] == character["owner_user_id"] or _is_admin_role(user.get("role"))
+
     # ------------------------------------------------------------------ GET
     def do_GET(self):
         parsed = urlparse(self.path)
@@ -353,7 +375,9 @@ class Handler(BaseHTTPRequestHandler):
 
             if path in ("/login.html", "/register.html", "/create.html", "/story.html",
                         "/usage.html", "/faq.html", "/help.html", "/admin.html",
-                        "/admin-users.html", "/admin-stories.html"):
+                        "/admin-users.html", "/admin-stories.html", "/admin-characters.html",
+                        "/admin-competitions.html", "/characters.html", "/my-characters.html",
+                        "/competitions.html", "/competition.html"):
                 self._serve_static_file(path.lstrip("/"))
                 return
 
@@ -733,6 +757,218 @@ class Handler(BaseHTTPRequestHandler):
                     self._send_bytes(build_zip(job_dir), "application/zip", f"{title}.zip")
                 return
 
+            if path == "/api/characters/mine":
+                user = self._current_user()
+                if not user:
+                    self._send_error_json("login required", 401)
+                    return
+                characters = sorted(
+                    db.list_characters_for_user(user["id"]), key=lambda c: c["created_at"], reverse=True)
+                self._send_json({"characters": characters})
+                return
+
+            if path == "/api/characters/library":
+                category = (qs.get("category", [None])[0] or "").strip() or None
+                age_group = (qs.get("age_group", [None])[0] or "").strip() or None
+                school = (qs.get("school", [None])[0] or "").strip() or None
+                search = (qs.get("search", [None])[0] or "").strip() or None
+                sort = (qs.get("sort", ["recent"])[0] or "recent").strip()
+                characters = db.list_published_characters(
+                    category=category, age_group=age_group, school=school,
+                    search=search, sort=sort)
+                self._send_json({"characters": characters})
+                return
+
+            if path == "/api/characters/search":
+                # Backs the "reference existing characters" picker on
+                # create.html - published characters (anyone's) plus the
+                # caller's own regardless of status, so someone can draft a
+                # story around a character they just created but haven't
+                # published yet.
+                user = self._current_user()
+                if not user:
+                    self._send_error_json("login required", 401)
+                    return
+                query = (qs.get("query", [None])[0] or "").strip()
+                published = db.list_published_characters(search=query or None)
+                mine = [
+                    c for c in db.list_characters_for_user(user["id"])
+                    if c["status"] != "published" and (not query or query.lower() in c["name"].lower())
+                ]
+                seen_ids = set()
+                results = []
+                for c in mine + published:
+                    if c["id"] in seen_ids:
+                        continue
+                    seen_ids.add(c["id"])
+                    results.append(c)
+                self._send_json({"characters": results[:25]})
+                return
+
+            if path == "/api/characters/detail":
+                character_id = qs.get("character_id", [None])[0]
+                try:
+                    character_id = int(character_id)
+                except (TypeError, ValueError):
+                    self._send_error_json("invalid character_id", 400)
+                    return
+                character = db.get_character(character_id)
+                if not self._can_view_character(character):
+                    self._send_error_json("character not found", 404)
+                    return
+                self._send_json({"character": character})
+                return
+
+            if path == "/api/characters/image":
+                character_id = qs.get("character_id", [None])[0]
+                try:
+                    character_id = int(character_id)
+                except (TypeError, ValueError):
+                    self._send_error_json("image not found", 404)
+                    return
+                character = db.get_character(character_id)
+                if not self._can_view_character(character):
+                    self._send_error_json("image not found", 404)
+                    return
+                image_bytes = character_studio.get_reference_image_bytes(character)
+                if not image_bytes:
+                    self._send_error_json("image not found", 404)
+                    return
+                self._send_bytes(image_bytes, "image/png")
+                return
+
+            if path == "/api/admin/characters/pending":
+                if not self._require_admin():
+                    return
+                self._send_json({"characters": db.list_pending_characters()})
+                return
+
+            if path == "/api/competitions":
+                status = qs.get("status", [None])[0]
+                self._send_json({"competitions": db.list_competitions(status=status)})
+                return
+
+            if path == "/api/competitions/detail":
+                competition_id = qs.get("competition_id", [None])[0]
+                try:
+                    competition_id = int(competition_id)
+                except (TypeError, ValueError):
+                    self._send_error_json("invalid competition_id", 400)
+                    return
+                competition = db.get_competition(competition_id)
+                if not competition:
+                    self._send_error_json("competition not found", 404)
+                    return
+                self._send_json({"competition": competition})
+                return
+
+            if path == "/api/competitions/leaderboard":
+                competition_id = qs.get("competition_id", [None])[0]
+                try:
+                    competition_id = int(competition_id)
+                except (TypeError, ValueError):
+                    self._send_error_json("invalid competition_id", 400)
+                    return
+                competition = db.get_competition(competition_id)
+                if not competition:
+                    self._send_error_json("competition not found", 404)
+                    return
+                entries = db.list_entries_for_competition(competition_id)
+                # Live score order while the competition is still open;
+                # once closed, the stored rank (set by finalize(), which
+                # tie-breaks and handles unscored entries) is authoritative.
+                if competition["status"] == "closed":
+                    entries.sort(key=lambda e: (e["rank"] is None, e["rank"] if e["rank"] is not None else 0))
+                else:
+                    entries.sort(key=lambda e: (
+                        e["score_total"] is None, -(e["score_total"] or 0), e["submitted_at"]))
+                board = []
+                for e in entries:
+                    story = self._load_story_summary(e["job_id"])
+                    board.append({
+                        "entry_id": e["id"], "username": e.get("username") or "(deleted user)",
+                        "story_title": story.get("title") if story else None,
+                        "job_id": e["job_id"], "score_total": e["score_total"],
+                        "rank": e["rank"], "is_winner": e["is_winner"],
+                    })
+                self._send_json({"competition": competition, "leaderboard": board})
+                return
+
+            if path == "/api/competitions/mine":
+                user = self._current_user()
+                if not user:
+                    self._send_error_json("login required", 401)
+                    return
+                competition_id = qs.get("competition_id", [None])[0]
+                try:
+                    competition_id = int(competition_id)
+                except (TypeError, ValueError):
+                    self._send_error_json("invalid competition_id", 400)
+                    return
+                entries = [e for e in db.list_entries_for_user(user["id"]) if e["competition_id"] == competition_id]
+                self._send_json({"entry": entries[0] if entries else None})
+                return
+
+            if path == "/api/competitions/certificate":
+                user = self._current_user()
+                if not user:
+                    self._send_error_json("please log in", 401)
+                    return
+                entry_id = qs.get("entry_id", [None])[0]
+                cert_type = (qs.get("type", ["participation"])[0] or "participation").strip()
+                try:
+                    entry_id = int(entry_id)
+                except (TypeError, ValueError):
+                    self._send_error_json("invalid entry_id", 400)
+                    return
+                entry = db.get_entry_by_id(entry_id)
+                if not entry:
+                    self._send_error_json("certificate not found", 404)
+                    return
+                if entry["user_id"] != user["id"] and not _is_admin_role(user["role"]):
+                    self._send_error_json("you don't own this entry", 403)
+                    return
+                if cert_type == "winner":
+                    if not entry["is_winner"]:
+                        self._send_error_json("this entry did not win", 404)
+                        return
+                    rel_path = entry.get("certificate_winner_path")
+                else:
+                    rel_path = entry.get("certificate_participation_path")
+                if not rel_path:
+                    self._send_error_json("certificate not generated yet", 404)
+                    return
+                full_path = os.path.join(config.GENERATED_DIR, rel_path)
+                if not os.path.isfile(full_path):
+                    self._send_error_json("certificate not found", 404)
+                    return
+                with open(full_path, "rb") as f:
+                    self._send_bytes(f.read(), "application/pdf", f"certificate_{entry_id}_{cert_type}.pdf")
+                return
+
+            if path == "/api/admin/competitions":
+                if not self._require_admin():
+                    return
+                self._send_json({"competitions": db.list_competitions()})
+                return
+
+            if path == "/api/admin/competitions/entries":
+                if not self._require_admin():
+                    return
+                competition_id = qs.get("competition_id", [None])[0]
+                try:
+                    competition_id = int(competition_id)
+                except (TypeError, ValueError):
+                    self._send_error_json("invalid competition_id", 400)
+                    return
+                entries = db.list_entries_for_competition(competition_id)
+                for e in entries:
+                    story = self._load_story_summary(e["job_id"])
+                    e["story_title"] = story.get("title") if story else None
+                entries.sort(key=lambda e: (e["score_total"] is None, -(e["score_total"] or 0)))
+                self._send_json({"entries": entries})
+                return
+
             self.send_response(404)
             self.end_headers()
         except Exception as e:  # noqa: BLE001
@@ -949,10 +1185,28 @@ class Handler(BaseHTTPRequestHandler):
                 region = (body.get("region") or "").strip()
                 secondary_language = (body.get("secondary_language") or "").strip()
                 photo_b64 = body.get("character_photo_base64")
+                character_ids = body.get("character_ids") or []
 
                 if not initial_text:
                     self._send_error_json("initial_text is required", 400)
                     return
+
+                # Referenced Character Library entries - visible to this
+                # caller (published, or their own regardless of status) are
+                # loaded up front and locked into the job, so pipeline.py's
+                # run_job never has to re-check permissions itself; an id
+                # that's invalid or not visible to this user is silently
+                # dropped rather than erroring the whole story out, since a
+                # stale/mistyped id in the picker shouldn't block story
+                # creation entirely.
+                referenced_characters = []
+                for raw_id in character_ids:
+                    try:
+                        character = db.get_character(int(raw_id))
+                    except (TypeError, ValueError):
+                        continue
+                    if character and self._can_view_character(character):
+                        referenced_characters.append(character)
 
                 job_id = new_job_id()
                 job_dir = os.path.join(config.GENERATED_DIR, job_id)
@@ -980,6 +1234,7 @@ class Handler(BaseHTTPRequestHandler):
                     "region": region,
                     "secondary_language": secondary_language,
                     "character_photo_path": photo_path,
+                    "referenced_characters": referenced_characters,
                 }
                 with JOBS_LOCK:
                     JOBS[job_id] = job
@@ -1526,6 +1781,293 @@ class Handler(BaseHTTPRequestHandler):
                     self._send_error_json("unknown footer link", 404)
                     return
                 self._send_json({"ok": True})
+                return
+
+            if path == "/api/characters/create":
+                user = self._current_user()
+                if not user:
+                    self._send_error_json("please log in", 401)
+                    return
+                body = self._read_json_body()
+                prompt_text = (body.get("prompt_text") or "").strip()
+                char_type = (body.get("type") or "kid").strip().lower()
+                if char_type not in ("kid", "animal"):
+                    char_type = "kid"
+                if not prompt_text:
+                    self._send_error_json("prompt_text is required", 400)
+                    return
+                if len(prompt_text) > MAX_CHARACTER_PROMPT_LEN:
+                    self._send_error_json(
+                        f"character idea is too long (max {MAX_CHARACTER_PROMPT_LEN} characters)", 400)
+                    return
+                category = (body.get("category") or "").strip() or None
+                age_group = (body.get("age_group") or "").strip() or None
+                school = (body.get("school") or "").strip() or None
+                try:
+                    character = character_studio.create_character_from_prompt(
+                        user["id"], prompt_text, char_type, category, age_group, school)
+                except ImageGenerationError as e:
+                    self._send_error_json(f"Could not generate a reference image: {e}", 502)
+                    return
+                self._send_json({"ok": True, "character": character})
+                return
+
+            if path == "/api/characters/create_from_story":
+                user = self._current_user()
+                if not user:
+                    self._send_error_json("please log in", 401)
+                    return
+                body = self._read_json_body()
+                job_id = (body.get("job_id") or "").strip()
+                character_name = (body.get("character_name") or "").strip()
+                if not _JOB_ID_RE.fullmatch(job_id) or not character_name:
+                    self._send_error_json("job_id and character_name are required", 400)
+                    return
+                owner_id = db.get_story_owner_id(job_id)
+                if owner_id is None:
+                    self._send_error_json("unknown job_id", 404)
+                    return
+                if owner_id != user["id"] and not _is_admin_role(user["role"]):
+                    self._send_error_json("you don't own this story", 403)
+                    return
+                try:
+                    character = character_studio.create_character_from_story(
+                        user["id"], job_id, character_name)
+                except ValueError as e:
+                    self._send_error_json(str(e), 400)
+                    return
+                self._send_json({"ok": True, "character": character})
+                return
+
+            if path == "/api/characters/update":
+                user = self._current_user()
+                if not user:
+                    self._send_error_json("please log in", 401)
+                    return
+                body = self._read_json_body()
+                try:
+                    character_id = int(body.get("character_id"))
+                except (TypeError, ValueError):
+                    self._send_error_json("invalid character_id", 400)
+                    return
+                character = db.get_character(character_id)
+                if not character:
+                    self._send_error_json("unknown character", 404)
+                    return
+                is_admin = _is_admin_role(user["role"])
+                if character["owner_user_id"] != user["id"] and not is_admin:
+                    self._send_error_json("you don't own this character", 403)
+                    return
+                was_published = character["status"] == "published"
+                updated = db.update_character(
+                    character_id,
+                    name=(body.get("name") or "").strip() or None,
+                    description=body.get("description"),
+                    appearance=(body.get("appearance") or "").strip() or None,
+                    personality=body.get("personality"),
+                    type=(body.get("type") or "").strip() or None,
+                    category=(body.get("category") or "").strip() or None,
+                    age_group=(body.get("age_group") or "").strip() or None,
+                    school=(body.get("school") or "").strip() or None,
+                )
+                # Editing a live, published character without a fresh review
+                # would let its appearance drift out from under every story
+                # that has already locked it in via character_ids - reverting
+                # to "pending" here forces a re-approval before the edit
+                # actually takes effect for new stories. Admin edits are
+                # exempt (an admin editing their own moderation queue doesn't
+                # need to re-review themselves).
+                if was_published and not is_admin:
+                    updated = db.set_character_status(character_id, "pending")
+                self._send_json({"ok": True, "character": updated})
+                return
+
+            if path == "/api/characters/submit":
+                user = self._current_user()
+                if not user:
+                    self._send_error_json("please log in", 401)
+                    return
+                body = self._read_json_body()
+                try:
+                    character_id = int(body.get("character_id"))
+                except (TypeError, ValueError):
+                    self._send_error_json("invalid character_id", 400)
+                    return
+                character = db.get_character(character_id)
+                if not character:
+                    self._send_error_json("unknown character", 404)
+                    return
+                if character["owner_user_id"] != user["id"] and not _is_admin_role(user["role"]):
+                    self._send_error_json("you don't own this character", 403)
+                    return
+                if not character.get("reference_image_path"):
+                    self._send_error_json("this character has no reference image yet", 400)
+                    return
+                # Admin/superadmin submissions publish immediately - a
+                # regular "user" role (this app's only non-privileged role,
+                # standing in for "student") needs admin review first.
+                target_status = "published" if _is_admin_role(user["role"]) else "pending"
+                updated = db.submit_character_for_publication(character_id, target_status)
+                self._send_json({"ok": True, "character": updated})
+                return
+
+            if path == "/api/characters/delete":
+                user = self._current_user()
+                if not user:
+                    self._send_error_json("please log in", 401)
+                    return
+                body = self._read_json_body()
+                try:
+                    character_id = int(body.get("character_id"))
+                except (TypeError, ValueError):
+                    self._send_error_json("invalid character_id", 400)
+                    return
+                character = db.get_character(character_id)
+                if not character:
+                    self._send_error_json("unknown character", 404)
+                    return
+                if character["owner_user_id"] != user["id"] and not _is_admin_role(user["role"]):
+                    self._send_error_json("you don't own this character", 403)
+                    return
+                db.delete_character(character_id)
+                self._send_json({"ok": True})
+                return
+
+            if path == "/api/admin/characters/moderate":
+                if not self._require_admin():
+                    return
+                body = self._read_json_body()
+                try:
+                    character_id = int(body.get("character_id"))
+                except (TypeError, ValueError):
+                    self._send_error_json("invalid character_id", 400)
+                    return
+                action = (body.get("action") or "").strip()
+                note = (body.get("note") or "").strip() or None
+                if action == "approve":
+                    updated = db.set_character_status(character_id, "published")
+                elif action in ("reject", "request_changes"):
+                    updated = db.set_character_status(character_id, "rejected", note)
+                else:
+                    self._send_error_json("action must be approve, reject, or request_changes", 400)
+                    return
+                if not updated:
+                    self._send_error_json("unknown character", 404)
+                    return
+                self._send_json({"ok": True, "character": updated})
+                return
+
+            if path == "/api/competitions/enter":
+                user = self._current_user()
+                if not user:
+                    self._send_error_json("please log in", 401)
+                    return
+                body = self._read_json_body()
+                job_id = (body.get("job_id") or "").strip()
+                entry_type = (body.get("entry_type") or "existing").strip()
+                if entry_type not in ("existing", "new"):
+                    entry_type = "existing"
+                try:
+                    competition_id = int(body.get("competition_id"))
+                except (TypeError, ValueError):
+                    self._send_error_json("invalid competition_id", 400)
+                    return
+                if not _JOB_ID_RE.fullmatch(job_id):
+                    self._send_error_json("invalid job_id", 400)
+                    return
+
+                competition = db.get_competition(competition_id)
+                if not competition:
+                    self._send_error_json("competition not found", 404)
+                    return
+                if competition["status"] != "active":
+                    self._send_error_json("this competition is not currently accepting entries", 400)
+                    return
+                today = time.strftime("%Y-%m-%d")
+                if today < competition["start_date"] or today > competition["end_date"]:
+                    self._send_error_json("this competition is not currently within its active dates", 400)
+                    return
+
+                owner_id = db.get_story_owner_id(job_id)
+                if owner_id is None or owner_id != user["id"]:
+                    self._send_error_json("you don't own this story", 403)
+                    return
+                story = self._load_story_summary(job_id)
+                if not story:
+                    self._send_error_json("this story isn't ready yet", 400)
+                    return
+
+                entry = db.create_or_update_entry(competition_id, job_id, user["id"], entry_type)
+                try:
+                    scores = openai_client.score_competition_entry(story, competition)
+                    db.set_entry_scores(entry["id"], scores, scores.get("feedback", ""))
+                except Exception as e:
+                    # The entry is recorded either way - a scoring failure
+                    # shouldn't block someone from having entered. Entering
+                    # again later re-scores it, since create_or_update_entry
+                    # is a safe upsert.
+                    traceback.print_exc()
+                    self._send_json({"ok": True, "entry": entry, "scored": False, "score_error": str(e)})
+                    return
+
+                self._send_json({"ok": True, "entry": db.get_entry_by_id(entry["id"]), "scored": True})
+                return
+
+            if path == "/api/admin/competitions/create":
+                admin = self._require_admin()
+                if not admin:
+                    return
+                body = self._read_json_body()
+                title = (body.get("title") or "").strip()
+                description = (body.get("description") or "").strip()
+                theme = (body.get("theme") or "").strip()
+                start_date = (body.get("start_date") or "").strip()
+                end_date = (body.get("end_date") or "").strip()
+                if not title or not start_date or not end_date:
+                    self._send_error_json("title, start_date, and end_date are required", 400)
+                    return
+                competition = db.create_competition(title, description, theme, start_date, end_date, admin["id"])
+                self._send_json({"ok": True, "competition": competition})
+                return
+
+            if path == "/api/admin/competitions/update":
+                if not self._require_admin():
+                    return
+                body = self._read_json_body()
+                try:
+                    competition_id = int(body.get("competition_id"))
+                except (TypeError, ValueError):
+                    self._send_error_json("invalid competition_id", 400)
+                    return
+                updated = db.update_competition(
+                    competition_id,
+                    title=(body.get("title") or "").strip() or None,
+                    description=body.get("description"),
+                    theme=(body.get("theme") or "").strip() or None,
+                    start_date=(body.get("start_date") or "").strip() or None,
+                    end_date=(body.get("end_date") or "").strip() or None,
+                )
+                if not updated:
+                    self._send_error_json("unknown competition", 404)
+                    return
+                self._send_json({"ok": True, "competition": updated})
+                return
+
+            if path == "/api/admin/competitions/finalize":
+                if not self._require_admin():
+                    return
+                body = self._read_json_body()
+                try:
+                    competition_id = int(body.get("competition_id"))
+                except (TypeError, ValueError):
+                    self._send_error_json("invalid competition_id", 400)
+                    return
+                try:
+                    competition = competition_engine.finalize(competition_id)
+                except ValueError as e:
+                    self._send_error_json(str(e), 404)
+                    return
+                self._send_json({"ok": True, "competition": competition})
                 return
 
             self.send_response(404)

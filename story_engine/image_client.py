@@ -282,7 +282,8 @@ def build_prompt(character_block: str, scene_text: str, region: str,
 def generate_scene_image(character_block: str, scene_text: str, region: str = "",
                           characters: list = None, reference_image_bytes: bytes = None,
                           size=(1024, 1024), custom_prompt: str = None,
-                          page_number: int = None, total_pages: int = None):
+                          page_number: int = None, total_pages: int = None,
+                          verification_reference_images: list = None):
     """Generate one page's illustration, from text alone - see the
     CHARACTER CONSISTENCY STRATEGY note at the top of this file for why
     reference-image conditioning (DeepAI's Image Editor endpoint) was tried
@@ -318,6 +319,13 @@ def generate_scene_image(character_block: str, scene_text: str, region: str = ""
     - `page_number`/`total_pages`: forwarded to `build_prompt()` for its
       per-page uniqueness clause; ignored when `custom_prompt` is given
       (the user's exact text is never modified).
+    - `verification_reference_images`: optional list of `(character_name,
+      image_bytes)` for characters pulled from the Character Library -
+      passed through to the post-generation vision consistency check (see
+      `_verify_and_maybe_retry`/`openai_client.verify_scene_image`) as
+      additional ground truth alongside `character_block`'s text. Verify-only,
+      per this file's CHARACTER CONSISTENCY STRATEGY note above - never fed
+      into the actual DeepAI generation call.
     """
     watermark_text = db.get_site_settings()["site_name"]
 
@@ -338,7 +346,8 @@ def generate_scene_image(character_block: str, scene_text: str, region: str = ""
     for attempt in range(MAX_PROMPT_ADJUST_ATTEMPTS):
         try:
             image_bytes = _deepai_image(prompt)
-            image_bytes, prompt = _verify_and_maybe_retry(image_bytes, prompt, character_block)
+            image_bytes, prompt = _verify_and_maybe_retry(
+                image_bytes, prompt, character_block, verification_reference_images)
             return _add_watermark(image_bytes, watermark_text), prompt
         except UnsafeContentError as e:
             print(f"[kertoons] image prompt flagged unsafe (attempt {attempt + 1}/"
@@ -348,7 +357,8 @@ def generate_scene_image(character_block: str, scene_text: str, region: str = ""
     raise last_error
 
 
-def _verify_and_maybe_retry(image_bytes: bytes, prompt: str, character_block: str) -> tuple:
+def _verify_and_maybe_retry(image_bytes: bytes, prompt: str, character_block: str,
+                             verification_reference_images: list = None) -> tuple:
     """Generate-then-verify-then-retry: a plain text2img call can only be
     ASKED to keep every character's fixed traits straight (see
     build_prompt's boilerplate); this is the check that something actually
@@ -360,13 +370,18 @@ def _verify_and_maybe_retry(image_bytes: bytes, prompt: str, character_block: st
     result is used anyway (the retry's amended prompt is at least no worse
     than the original) rather than looping indefinitely on the API's dime.
 
+    `verification_reference_images`: forwarded to
+    openai_client.verify_scene_image() as-is - see generate_scene_image()'s
+    docstring.
+
     Controlled by config.IMAGE_CONSISTENCY_CHECK (on by default whenever
     OPENAI_API_KEY is set - verify_scene_image() itself already no-ops to
     an always-passing result without one, so this flag exists purely so an
     admin can turn the extra vision-API cost/latency off explicitly)."""
     if not config.IMAGE_CONSISTENCY_CHECK:
         return image_bytes, prompt
-    verdict = openai_client.verify_scene_image(image_bytes, character_block)
+    verdict = openai_client.verify_scene_image(
+        image_bytes, character_block, reference_images=verification_reference_images)
     if verdict["consistent"]:
         return image_bytes, prompt
 
@@ -386,6 +401,25 @@ def _verify_and_maybe_retry(image_bytes: bytes, prompt: str, character_block: st
         # rather than failing the whole page over a best-effort retry.
         print(f"[kertoons] consistency-check retry generation failed, keeping original image: {e}")
         return image_bytes, prompt
+
+
+def generate_character_reference_image(character: dict):
+    """One reference portrait for a Character Library entry (see
+    character_studio.create_character_from_prompt) - reuses the exact same
+    generation path every story page already goes through
+    (build_character_prompt_block + generate_scene_image), just with a
+    neutral "reference portrait" scene instead of a story beat, so this
+    character's reference image is produced with identical fidelity/quality
+    to any in-story illustration rather than a separate, parallel image
+    pipeline. Returns (image_bytes, prompt_used), same shape as
+    generate_scene_image()."""
+    from . import prompts  # local import: prompts.py doesn't import image_client, avoids any risk of a cycle
+    character_block = prompts.build_character_prompt_block([character])
+    scene_text = (
+        "a simple character reference portrait: standing alone, facing the camera, neutral "
+        "relaxed pose, plain soft-colored background, good even lighting, nothing else in the scene"
+    )
+    return generate_scene_image(character_block, scene_text, region="", characters=[character])
 
 
 # ------------------------------------------------------------- real DeepAI

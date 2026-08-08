@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Character Library - Kertoons</title>
+<link rel="stylesheet" href="static/style.css">
+</head>
+<body>
+<header>
+  <h1><img src="static/logo.png" alt="Kertoons" class="site-logo"></h1>
+  <p>Reusable characters, created by the community, ready to star in your next story</p>
+  <nav id="nav-bar" class="nav-bar"></nav>
+</header>
+
+<main>
+  <p><a class="btn-outline" href="my-characters.html">✏️ My Characters</a></p>
+
+  <div class="gallery-search-row">
+    <span class="gallery-search-icon" aria-hidden="true">🔍</span>
+    <input type="text" id="character-search" class="gallery-search-input"
+           placeholder="Search characters by name or description..." autocomplete="off">
+  </div>
+
+  <div class="admin-inline-form">
+    <input type="text" id="character-filter-category" placeholder="Filter by category" style="max-width:180px;">
+    <input type="text" id="character-filter-age" placeholder="Filter by age group" style="max-width:160px;">
+    <input type="text" id="character-filter-school" placeholder="Filter by school" style="max-width:180px;">
+    <label class="admin-inline-label">Sort
+      <select id="character-sort">
+        <option value="recent">Newest first</option>
+        <option value="popular">Most popular</option>
+      </select>
+    </label>
+  </div>
+
+  <p id="characters-empty" class="hint" style="text-align:center; display:none;">
+    No published characters yet - <a href="my-characters.html">create the first one</a>.
+  </p>
+  <p id="characters-no-matches" class="hint" style="text-align:center; display:none;">
+    No characters match your search or filters.
+  </p>
+  <div id="characters-grid" class="character-grid"></div>
+  <div id="characters-pagination"></div>
+</main>
+
+<script src="static/nav.js"></script>
+<script src="static/characters.js"></script>
+
+<footer class="site-footer">
+  <p><a href="faq.html">FAQ</a> · <a href="help.html">Help</a> ·
+  <span id="site-footer-text">kertoons.com - Another Elisda AI project</span><span id="footer-contact-email-wrap" style="display:none;"> · <a id="footer-contact-email-link" href="#"><span id="footer-contact-email"></span></a></span><span id="footer-contact-phone-wrap" style="display:none;"> · <span id="footer-contact-phone"></span></span><span id="footer-custom-links"></span></p>
+</footer>
+</body>
+</html>

@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Manage Competitions - Kertoons</title>
+<link rel="stylesheet" href="static/style.css">
+</head>
+<body>
+<header>
+  <h1><img src="static/logo.png" alt="Kertoons" class="site-logo"></h1>
+  <nav id="nav-bar" class="nav-bar"></nav>
+</header>
+
+<main>
+  <div id="admin-banner" class="banner"></div>
+
+  <section id="not-admin" class="card" style="display:none;">
+    <p>Admin access required.</p>
+  </section>
+
+  <section id="admin-panel" style="display:none;">
+    <p><a class="btn-outline" href="admin.html">‹ Back to admin</a></p>
+
+    <section class="card">
+      <h2>Create a Competition</h2>
+      <form id="create-competition-form">
+        <label for="new-competition-title">Title</label>
+        <input type="text" id="new-competition-title" placeholder="e.g. Space Adventures" required>
+        <label for="new-competition-theme">Theme</label>
+        <input type="text" id="new-competition-theme" placeholder="e.g. Space, Saving the Environment, Magical Forests">
+        <label for="new-competition-description">Description</label>
+        <textarea id="new-competition-description" rows="2" placeholder="What should entrants write about?"></textarea>
+        <div class="admin-inline-form">
+          <label class="admin-inline-label">Start date
+            <input type="date" id="new-competition-start" required>
+          </label>
+          <label class="admin-inline-label">End date
+            <input type="date" id="new-competition-end" required>
+          </label>
+          <button type="button" class="btn-outline" id="fill-this-month-btn">This month</button>
+          <button type="submit" class="btn-secondary">Create competition</button>
+        </div>
+      </form>
+    </section>
+
+    <section class="card">
+      <h2>Competitions</h2>
+      <div id="competitions-table-wrap"></div>
+    </section>
+
+    <section class="card" id="entries-card" style="display:none;">
+      <h2 id="entries-title">Entries</h2>
+      <div id="entries-table-wrap"></div>
+    </section>
+  </section>
+</main>
+
+<script src="static/nav.js"></script>
+<script src="static/admin-competitions.js"></script>
+
+<footer class="site-footer">
+  <p><a href="faq.html">FAQ</a> · <a href="help.html">Help</a> ·
+  <span id="site-footer-text">kertoons.com - Another Elisda AI project</span><span id="footer-contact-email-wrap" style="display:none;"> · <a id="footer-contact-email-link" href="#"><span id="footer-contact-email"></span></a></span><span id="footer-contact-phone-wrap" style="display:none;"> · <span id="footer-contact-phone"></span></span><span id="footer-custom-links"></span></p>
+</footer>
+</body>
+</html>

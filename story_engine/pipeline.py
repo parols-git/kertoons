@@ -22,6 +22,7 @@ from . import db
 from . import openai_client
 from . import gemini_client
 from . import image_client
+from . import character_studio
 from .prompts import build_character_prompt_block
 
 
@@ -74,8 +75,45 @@ def run_job(job: dict, job_dir: str):
         # time) so an admin's change to "scenes per story" in /admin.html
         # takes effect on the very next story, without a server restart.
         page_count = db.get_site_settings().get("page_count") or config.DEFAULT_PAGE_COUNT
-        story = openai_client.generate_story(initial_text, job.get("region", ""), page_count=page_count)
+        # Character Library entries the user picked on create.html (already
+        # loaded and visibility-checked by server.py - see POST /api/story's
+        # character_ids handling) - told to the story model as characters it
+        # must reuse exactly, not invent.
+        referenced_characters = job.get("referenced_characters") or []
+        story = openai_client.generate_story(
+            initial_text, job.get("region", ""), page_count=page_count,
+            locked_characters=referenced_characters,
+        )
         job["progress"] = 40
+
+        # Belt-and-braces: don't just trust the LLM followed the locked-
+        # characters instruction above - forcibly overwrite (or append, if it
+        # dropped the character entirely) each referenced character's entry
+        # in the story's own characters[] with the canonical, stored values,
+        # so the actual generated story can never end up with a name that
+        # exists in the Character Library but a different appearance than
+        # what's published there. Only type/appearance/personality are
+        # overwritten - the character's "name" field is left as whatever the
+        # model wrote (it should already match, since the model was told the
+        # exact name to use) so later "characters_present" name-matching
+        # below still lines up with this entry.
+        for ref in referenced_characters:
+            match = next(
+                (c for c in story.get("characters", [])
+                 if (c.get("name") or "").lower() == ref["name"].lower()),
+                None,
+            )
+            if match:
+                match["type"] = ref.get("type", match.get("type", "kid"))
+                match["appearance"] = ref["appearance"]
+                match["personality"] = ref.get("personality", "")
+            else:
+                story.setdefault("characters", []).append({
+                    "name": ref["name"],
+                    "type": ref.get("type", "kid"),
+                    "appearance": ref["appearance"],
+                    "personality": ref.get("personality", ""),
+                })
 
         secondary_language = job.get("secondary_language", "").strip()
         languages = _parse_languages(secondary_language)
@@ -109,7 +147,31 @@ def run_job(job: dict, job_dir: str):
 
         job["message"] = "Illustrating pages..."
         total_pages = len(story["pages"])
-        reference_registry = {}  # character name -> its debut page's image bytes
+        # character name -> (image bytes, debut page number or None). Seeded
+        # up front with each referenced Character Library entry's own stored
+        # reference image (page number left None - it isn't from a page of
+        # THIS story) so the very first page a locked character appears on
+        # already has a real reference to verify against, not just the text
+        # description; every OTHER character still gets its entry added the
+        # normal way, the moment its own debut page finishes generating
+        # below - see "reference_registry[name] = (image_bytes, ...)".
+        reference_registry = {}
+        for ref in referenced_characters:
+            ref_bytes = character_studio.get_reference_image_bytes(ref)
+            if ref_bytes:
+                reference_registry[ref["name"]] = (ref_bytes, None)
+        # Tracked separately from reference_registry above: this one records
+        # each character's real FIRST page number in THIS story, regardless
+        # of whether reference_registry already had a (library-sourced)
+        # entry for it seeded before the loop even started - used for
+        # story["character_debut_page"] below (which character_studio.
+        # create_character_from_story reads to let a user later save a
+        # story's own character into the Library). If debut pages were read
+        # back out of reference_registry instead, every Library-referenced
+        # character would wrongly show no debut page at all, since its
+        # pre-seeded entry means the "if name not in reference_registry"
+        # debut-tracking check below never fires for it.
+        debut_pages = {}
         for i, page in enumerate(story["pages"]):
             job["message"] = f"Illustrating page {page['page_number']} of {total_pages}..."
 
@@ -132,6 +194,19 @@ def run_job(job: dict, job_dir: str):
                     reference_bytes, reference_from_page = reference_registry[name]
                     break
 
+            # Every one of this page's present characters that already has a
+            # known-good reference image (a Character Library portrait, or
+            # its own debut page from earlier in this same story) - given to
+            # the post-generation vision consistency check as extra ground
+            # truth alongside the text description (see
+            # openai_client.verify_scene_image). Verification-only, per
+            # image_client.py's CHARACTER CONSISTENCY STRATEGY note - never
+            # fed into the actual DeepAI generation call below.
+            verification_reference_images = [
+                (name, reference_registry[name][0])
+                for name in present_names if name in reference_registry
+            ]
+
             scene_text = page.get("panel_visual") or page.get("text", "")
             image_bytes, prompt_used = image_client.generate_scene_image(
                 character_block,
@@ -141,6 +216,7 @@ def run_job(job: dict, job_dir: str):
                 reference_image_bytes=reference_bytes,
                 page_number=page["page_number"],
                 total_pages=total_pages,
+                verification_reference_images=verification_reference_images,
             )
             filename = f"page_{page['page_number']}.png"
             with open(os.path.join(job_dir, filename), "wb") as f:
@@ -163,12 +239,15 @@ def run_job(job: dict, job_dir: str):
             for name in present_names:
                 if name not in reference_registry:
                     reference_registry[name] = (image_bytes, page["page_number"])
+                if name not in debut_pages:
+                    debut_pages[name] = page["page_number"]
 
             job["progress"] = 52 + int(38 * (i + 1) / total_pages)
 
-        story["character_debut_page"] = {
-            name: page_no for name, (_, page_no) in reference_registry.items()
-        }
+        story["character_debut_page"] = debut_pages
+        for ref in referenced_characters:
+            if ref["name"] in debut_pages:
+                db.increment_character_use_count(ref["id"])
         story["mock_story"] = bool(config.MOCK_STORY)
         story["mock_translation"] = bool(config.MOCK_TRANSLATION)
         story["mock_images"] = bool(config.MOCK_IMAGES)
@@ -232,6 +311,22 @@ def regenerate_page_image(job_dir: str, page_number: int, user_id: int, custom_p
             with open(ref_path, "rb") as f:
                 reference_bytes = f.read()
 
+    # Same reference-based verification as run_job's per-page loop, using
+    # story.json's own "character_debut_page" (already recorded for every
+    # story, old or new) - for each present character other than on its own
+    # debut page, its debut image is included as extra ground truth for the
+    # consistency check.
+    debut_pages = story.get("character_debut_page") or {}
+    verification_reference_images = []
+    for name in present_names:
+        debut_page_no = debut_pages.get(name)
+        if not debut_page_no or debut_page_no == page_number:
+            continue
+        debut_path = os.path.join(job_dir, f"page_{debut_page_no}.png")
+        if os.path.exists(debut_path):
+            with open(debut_path, "rb") as f:
+                verification_reference_images.append((name, f.read()))
+
     scene_text = page.get("panel_visual") or page.get("text", "")
     total_pages = len(story.get("pages", []))
     image_bytes, prompt_used = image_client.generate_scene_image(
@@ -243,6 +338,7 @@ def regenerate_page_image(job_dir: str, page_number: int, user_id: int, custom_p
         custom_prompt=custom_prompt,
         page_number=page_number,
         total_pages=total_pages,
+        verification_reference_images=verification_reference_images,
     )
     image_file = page.get("image_file") or f"page_{page_number}.png"
     with open(os.path.join(job_dir, image_file), "wb") as f:

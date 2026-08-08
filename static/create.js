@@ -22,6 +22,110 @@ let myStoriesPage = 1;
 let storyPageCount = 5; // synced from /api/config below; 5 is the app's fixed page count
 const MY_STORIES_PAGE_SIZE = 6;
 
+// ----------------------------------------------------- character picker
+// "Reference existing characters" on the story form - deliberately an
+// explicit id-based picker (search -> click to add) rather than asking the
+// user to type a character's name into the free-text story idea and having
+// the AI try to notice it there, which would be unreliable. Selecting a
+// character here becomes `character_ids` in the POST /api/story body (see
+// pipeline.py's locked-character handling).
+let selectedCharacters = [];
+let characterSearchTimer = null;
+
+function renderSelectedCharacters() {
+  const wrap = document.getElementById("character-picker-selected");
+  wrap.innerHTML = selectedCharacters.map(c => `
+    <span class="character-chip">
+      ${escapeHtml(c.name)}
+      <button type="button" onclick="removeSelectedCharacter(${c.id})" aria-label="Remove ${escapeHtml(c.name)}">×</button>
+    </span>
+  `).join("");
+}
+
+function removeSelectedCharacter(id) {
+  selectedCharacters = selectedCharacters.filter(c => c.id !== id);
+  renderSelectedCharacters();
+}
+
+function addSelectedCharacter(character) {
+  if (selectedCharacters.some(c => c.id === character.id)) return;
+  selectedCharacters.push({ id: character.id, name: character.name });
+  renderSelectedCharacters();
+  document.getElementById("character-picker-search").value = "";
+  document.getElementById("character-picker-results").innerHTML = "";
+}
+
+async function searchCharactersForPicker(query) {
+  const resultsWrap = document.getElementById("character-picker-results");
+  if (!query.trim()) {
+    resultsWrap.innerHTML = "";
+    return;
+  }
+  try {
+    const res = await fetch(`api/characters/search?query=${encodeURIComponent(query)}`);
+    if (!res.ok) return;
+    const data = await res.json();
+    const characters = (data.characters || []).filter(c => !selectedCharacters.some(s => s.id === c.id));
+    if (!characters.length) {
+      resultsWrap.innerHTML = `<p class="hint">No matching characters.</p>`;
+      return;
+    }
+    resultsWrap.innerHTML = characters.map(c => `
+      <button type="button" class="character-picker-result" onclick='addSelectedCharacter(${JSON.stringify({ id: c.id, name: c.name }).replace(/'/g, "&apos;")})'>
+        <img src="api/characters/image?character_id=${c.id}" alt="">
+        <span>${escapeHtml(c.name)} <span class="hint">(${escapeHtml(c.status)})</span></span>
+      </button>
+    `).join("");
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+// If this page was reached via competition.html's "Create a new story for
+// this competition" link (?competition_id=...), automatically enter the
+// freshly finished story into that competition the moment it's ready -
+// the user never has to separately remember to submit it.
+async function enterCompetitionIfRequested(jobId) {
+  const params = new URLSearchParams(window.location.search);
+  const competitionId = params.get("competition_id");
+  if (!competitionId) return;
+  try {
+    const res = await fetch("api/competitions/enter", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ competition_id: Number(competitionId), job_id: jobId, entry_type: "new" }),
+    });
+    const data = await res.json();
+    if (res.ok) {
+      showError(""); // clear any stale error styling
+      errorBox.classList.remove("show");
+      const banner = document.createElement("p");
+      banner.className = "hint";
+      banner.textContent = data.scored
+        ? "Your story has been entered into the competition and scored - see the leaderboard for your result."
+        : "Your story has been entered into the competition.";
+      bookSection.prepend(banner);
+    } else {
+      console.error(data.error);
+    }
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+async function preselectCharacterFromQueryString() {
+  const params = new URLSearchParams(window.location.search);
+  const characterId = params.get("character_id");
+  if (!characterId) return;
+  try {
+    const res = await fetch(`api/characters/detail?character_id=${characterId}`);
+    if (!res.ok) return;
+    const data = await res.json();
+    if (data.character) addSelectedCharacter(data.character);
+  } catch (e) {
+    console.error(e);
+  }
+}
+
 async function loadConfig() {
   try {
     const res = await fetch("api/config");
@@ -100,6 +204,7 @@ form.addEventListener("submit", async (e) => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         initial_text, region, secondary_language, character_photo_base64,
+        character_ids: selectedCharacters.map(c => c.id),
       }),
     });
     const data = await res.json();
@@ -130,6 +235,7 @@ function pollStatus(jobId) {
         resetForm();
         loadMyStories(true);
         renderNav().then(updateCreditGate); // credit balance just dropped by 5 - refresh the gate
+        enterCompetitionIfRequested(jobId);
       } else if (job.status === "error") {
         clearInterval(pollTimer);
         finishWithError(job.error || "Something went wrong generating the story.");
@@ -255,5 +361,11 @@ function updateCreditGate(user) {
   } else {
     loadMyStories();
     updateCreditGate(user);
+    document.getElementById("character-picker-search").addEventListener("input", (e) => {
+      clearTimeout(characterSearchTimer);
+      const query = e.target.value;
+      characterSearchTimer = setTimeout(() => searchCharactersForPicker(query), 300);
+    });
+    await preselectCharacterFromQueryString();
   }
 })();
